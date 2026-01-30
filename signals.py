@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — SIGNAL ENGINE
-# FUTURES WITH LTF ENTRY (PROP-FIRM GRADE)
+# FUTURES WITH LTF ENTRY (PROP-FIRM GRADE, PATCHED)
 # =====================================================
 
 from config import (
@@ -28,9 +28,10 @@ from utils import now_wib, is_danger_time
 def futures_ltf_entry(df_ltf, direction):
     """
     Return entry price or None
+
     Logic:
     - EMA20 reclaim / reject
-    - Momentum confirmation
+    - Strong momentum confirmation
     """
 
     close = df_ltf.close
@@ -39,17 +40,19 @@ def futures_ltf_entry(df_ltf, direction):
     if len(close) < 30:
         return None
 
+    # LONG execution
     if direction == "LONG":
         if (
             close.iloc[-1] > ema20.iloc[-1] and
-            close.iloc[-1] > close.iloc[-2]
+            close.iloc[-1] > close.iloc[-3]
         ):
             return close.iloc[-1]
 
+    # SHORT execution
     if direction == "SHORT":
         if (
             close.iloc[-1] < ema20.iloc[-1] and
-            close.iloc[-1] < close.iloc[-2]
+            close.iloc[-1] < close.iloc[-3]
         ):
             return close.iloc[-1]
 
@@ -75,7 +78,7 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # FETCH DATA (CACHED SAFE)
+    # FETCH DATA
     # =========================
     try:
         df4h = fetch_ohlcv(symbol, ENTRY_TF, LIMIT_4H)
@@ -88,7 +91,7 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # TREND DIRECTION (HTF)
+    # HTF TREND
     # =========================
     _, trend = supertrend(df4h, period=10, mult=3.0)
     direction = "LONG" if trend.iloc[-1] == 1 else "SHORT"
@@ -174,6 +177,12 @@ def check_signal(symbol, mode, balance):
         entry_ltf = futures_ltf_entry(df_ltf, direction)
         if not entry_ltf:
             return None
+
+        # anti-chasing guard (max 1% from HTF price)
+        htf_price = df4h.close.iloc[-1]
+        if abs(entry_ltf - htf_price) / htf_price > 0.01:
+            return None
+
         entry = entry_ltf
 
     # =========================
