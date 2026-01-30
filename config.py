@@ -40,3 +40,8 @@ FUTURES_MAX_NOTIONAL = 0.25 # use only 25% leverage power
 SIGNAL_LOG_FILE = "signal_history.csv"
 TRADE_RESULT_FILE = "trade_results.csv"
 FUTURES_TRADE_FILE = "futures_trades.csv"
+
+# Futures execution
+FUTURES_EXEC_TF = "15m"     # bisa 5m untuk lebih agresif
+FUTURES_LTF_LIMIT = 200
+
