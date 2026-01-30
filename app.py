@@ -1,5 +1,5 @@
 # =====================================================
-# OPSI A PRO — MAIN APP (FINAL)
+# OPSI A PRO — MAIN APP (FINAL + SINGLE COIN)
 # =====================================================
 import streamlit as st
 import time
@@ -22,6 +22,7 @@ from history import (
     auto_label_signals
 )
 from montecarlo import run_monte_carlo
+from analysis import analyze_single_coin   # 👈 SINGLE COIN
 
 # =====================================================
 # PAGE
@@ -59,14 +60,15 @@ elif MODE == "SPOT" and not is_safe_spot_time():
 # =====================================================
 # TABS
 # =====================================================
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "📡 Scan Market",
     "📜 Signal History",
-    "🎲 Monte Carlo"
+    "🎲 Monte Carlo",
+    "🎯 Analisa Single Coin"
 ])
 
 # =====================================================
-# TAB 1 — SCAN
+# TAB 1 — SCAN MARKET
 # =====================================================
 with tab1:
     if st.button("🔍 Scan Market"):
@@ -78,7 +80,6 @@ with tab1:
         found = []
         progress = st.progress(0.0)
         status = st.empty()
-
         total = len(symbols)
 
         for i, symbol in enumerate(symbols, 1):
@@ -163,5 +164,54 @@ with tab3:
                             opacity=0.3
                         )
                     )
-
                 st.plotly_chart(fig, use_container_width=True)
+
+# =====================================================
+# TAB 4 — ANALISA SINGLE COIN
+# =====================================================
+with tab4:
+    st.subheader("🎯 Analisa Single Coin (Logic Sama dengan Scanner)")
+
+    symbols = [
+        s for s, m in okx.markets.items()
+        if m.get("spot") and m.get("active") and s.endswith("/USDT")
+    ]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        symbol = st.selectbox("Pilih Coin", symbols)
+    with col2:
+        mode_an = st.radio("Mode Analisa", ["SPOT", "FUTURES"], horizontal=True)
+
+    bal_an = st.number_input(
+        "Balance untuk Analisa (USDT)",
+        value=10000.0,
+        step=100.0,
+        key="bal_an"
+    )
+
+    if st.button("🔍 Analyze Coin"):
+        res = analyze_single_coin(symbol, mode_an, bal_an)
+
+        st.markdown(f"## 📊 Hasil Analisa — `{symbol}`")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Trend", res["Trend"])
+        c2.metric("Score", res["Score"])
+        c3.metric("Mode", mode_an)
+
+        if res["Reasons"]:
+            st.error("❌ NO TRADE")
+            st.markdown("### 🔎 Alasan:")
+            for r in res["Reasons"]:
+                st.write(f"• {r}")
+        else:
+            st.success(f"✅ SETUP VALID ({res['Trend']})")
+            st.markdown("### 📌 Level Trade")
+            st.json({
+                "Entry": res["Entry"],
+                "SL": res["SL"],
+                "TP1": res["TP1"],
+                "TP2": res["TP2"],
+                "Position Size": res["PositionSize"]
+            })
