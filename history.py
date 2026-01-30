@@ -180,3 +180,48 @@ def auto_label_signals():
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
+
+# =====================================================
+# RESTORE / MERGE SIGNAL HISTORY FROM CSV
+# =====================================================
+def merge_signal_history(upload_df):
+    """
+    Merge uploaded CSV into signal_history.csv
+    Anti-duplicate by Symbol + Time + Mode + Direction
+    """
+
+    history = load_signal_history()
+
+    # pastikan semua kolom ada
+    for col in history.columns:
+        if col not in upload_df.columns:
+            upload_df[col] = ""
+
+    upload_df = upload_df[history.columns]
+
+    # buat unique key
+    history["_key"] = (
+        history["Symbol"].astype(str) +
+        history["Time"].astype(str) +
+        history["Mode"].astype(str) +
+        history["Direction"].astype(str)
+    )
+
+    upload_df["_key"] = (
+        upload_df["Symbol"].astype(str) +
+        upload_df["Time"].astype(str) +
+        upload_df["Mode"].astype(str) +
+        upload_df["Direction"].astype(str)
+    )
+
+    new_rows = upload_df[~upload_df["_key"].isin(history["_key"])]
+
+    if len(new_rows) > 0:
+        history = pd.concat(
+            [history.drop(columns="_key"), new_rows.drop(columns="_key")],
+            ignore_index=True
+        )
+        history.to_csv(SIGNAL_LOG_FILE, index=False)
+
+    return len(new_rows)
+
