@@ -22,7 +22,7 @@ from history import (
     auto_label_signals
 )
 from montecarlo import run_monte_carlo
-from analysis import analyze_single_coin   # 👈 SINGLE COIN
+from analyze_single_coin import analyze_single_coin   # 👈 SINGLE COIN
 
 # =====================================================
 # PAGE
