@@ -32,7 +32,7 @@ MAX_SCAN_SYMBOLS = 120
 
 # ===== FUTURES SAFE MODE =====
 FUTURES_RISK_PCT = 0.005     # 0.5% real risk
-FUTURES_LEVERAGE = 100
+FUTURES_LEVERAGE = 50
 FUTURES_MAX_SL   = 0.015    # max SL 1.5%
 FUTURES_MAX_NOTIONAL = 0.25 # use only 25% leverage power
 
