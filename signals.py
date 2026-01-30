@@ -1,21 +1,35 @@
 # =====================================================
-# OPSI A PRO — SIGNAL ENGINE
+# OPSI A PRO — SIGNAL ENGINE (FINAL FIXED)
 # =====================================================
+
 from config import (
     ENTRY_TF, DAILY_TF, LTF_TF,
     LIMIT_4H, LIMIT_1D, LIMIT_LTF,
     TP1_R, TP2_R, ZONE_BUFFER, SR_LOOKBACK
 )
+
 from exchange import fetch_ohlcv
-from indicators import supertrend, accumulation_distribution, find_support, find_resistance
+from indicators import (
+    supertrend,
+    accumulation_distribution,
+    find_support,
+    find_resistance
+)
 from scoring import institutional_score
 from regime import detect_market_regime, detect_regime_shift
 from risk import calculate_futures_position
 from utils import now_wib, is_danger_time
 
+
+# =====================================================
+# EXECUTION CONFIRMATION (LTF)
+# =====================================================
 def execution_confirmation(df_ltf, direction):
     close = df_ltf.close
     ema20 = close.ewm(span=20).mean()
+
+    if len(close) < 5:
+        return False
 
     if direction == "LONG":
         if close.iloc[-1] < ema20.iloc[-1]:
@@ -32,30 +46,47 @@ def execution_confirmation(df_ltf, direction):
     return True
 
 
-def check_signal(okx, symbol, mode, balance):
+# =====================================================
+# MAIN SIGNAL CHECK
+# =====================================================
+def check_signal(symbol, mode, balance):
+    """
+    Return:
+    - None
+    - MARKET_WARNING
+    - REGIME_SHIFT
+    - TRADE_EXECUTION
+    """
+
     # =========================
-    # Futures kill-switch
+    # FUTURES KILL SWITCH
     # =========================
     if mode == "FUTURES" and is_danger_time():
         return None
 
     # =========================
-    # Fetch data
+    # FETCH DATA (CACHED SAFE)
     # =========================
-    df4h = fetch_ohlcv(okx, symbol, ENTRY_TF, LIMIT_4H)
-    df1d = fetch_ohlcv(okx, symbol, DAILY_TF, LIMIT_1D)
-    df_ltf = fetch_ohlcv(okx, symbol, LTF_TF, LIMIT_LTF)
+    try:
+        df4h = fetch_ohlcv(symbol, ENTRY_TF, LIMIT_4H)
+        df1d = fetch_ohlcv(symbol, DAILY_TF, LIMIT_1D)
+        df_ltf = fetch_ohlcv(symbol, LTF_TF, LIMIT_LTF)
+    except Exception:
+        return None
+
+    if len(df4h) < 50 or len(df1d) < 50:
+        return None
 
     entry = df4h.close.iloc[-1]
 
     # =========================
-    # Direction
+    # TREND DIRECTION
     # =========================
     _, trend = supertrend(df4h, period=10, mult=3.0)
     direction = "LONG" if trend.iloc[-1] == 1 else "SHORT"
 
     # =========================
-    # Institutional Score
+    # INSTITUTIONAL SCORE
     # =========================
     score_data = institutional_score(df4h, df1d, direction)
     score = score_data["TotalScore"]
@@ -66,11 +97,13 @@ def check_signal(okx, symbol, mode, balance):
         return None
 
     # =========================
-    # Regime
+    # MARKET REGIME
     # =========================
     regime = detect_market_regime(df4h, df1d, score_data)
 
-    # Regime shift alert only
+    # =========================
+    # REGIME SHIFT ALERT
+    # =========================
     shift = detect_regime_shift(df4h, df1d)
     if shift:
         return {
@@ -81,7 +114,7 @@ def check_signal(okx, symbol, mode, balance):
         }
 
     # =========================
-    # Mode permission
+    # MODE PERMISSION
     # =========================
     if mode == "SPOT" and direction == "SHORT":
         return {
@@ -91,7 +124,10 @@ def check_signal(okx, symbol, mode, balance):
             "Message": "SPOT short = distribution (no buy)"
         }
 
-    if mode == "SPOT" and regime not in ["REGIME_ACCUMULATION", "REGIME_MARKUP"]:
+    if mode == "SPOT" and regime not in [
+        "REGIME_ACCUMULATION",
+        "REGIME_MARKUP"
+    ]:
         return {
             "SignalType": "MARKET_WARNING",
             "Symbol": symbol,
@@ -100,48 +136,66 @@ def check_signal(okx, symbol, mode, balance):
         }
 
     if mode == "FUTURES":
-        if direction == "LONG" and regime not in ["REGIME_ACCUMULATION","REGIME_MARKUP"]:
+        if direction == "LONG" and regime not in [
+            "REGIME_ACCUMULATION",
+            "REGIME_MARKUP"
+        ]:
             return None
-        if direction == "SHORT" and regime not in ["REGIME_DISTRIBUTION","REGIME_MARKDOWN"]:
+
+        if direction == "SHORT" and regime not in [
+            "REGIME_DISTRIBUTION",
+            "REGIME_MARKDOWN"
+        ]:
             return None
 
     # =========================
-    # ADL confirmation
+    # ADL CONFIRMATION
     # =========================
     adl = accumulation_distribution(df4h)
+
     if direction == "LONG" and adl.iloc[-1] <= adl.iloc[-10]:
         return None
+
     if direction == "SHORT" and adl.iloc[-1] >= adl.iloc[-10]:
         return None
 
     # =========================
-    # SL structure
+    # SL STRUCTURE + TARGET
     # =========================
     if direction == "LONG":
-        supports = [s for s in find_support(df1d, SR_LOOKBACK) if s < entry]
+        supports = [
+            s for s in find_support(df1d, SR_LOOKBACK)
+            if s < entry
+        ]
         if not supports:
             return None
+
         sl = max(supports) * (1 - ZONE_BUFFER)
         tp1 = entry + (entry - sl) * TP1_R
         tp2 = entry + (entry - sl) * TP2_R
         phase = "AKUMULASI_INSTITUSI"
+
     else:
-        resistances = [r for r in find_resistance(df1d, SR_LOOKBACK) if r > entry]
+        resistances = [
+            r for r in find_resistance(df1d, SR_LOOKBACK)
+            if r > entry
+        ]
         if not resistances:
             return None
+
         sl = min(resistances) * (1 + ZONE_BUFFER)
         tp1 = entry - (sl - entry) * TP1_R
         tp2 = entry - (sl - entry) * TP2_R
         phase = "DISTRIBUSI_INSTITUSI"
 
     # =========================
-    # Execution confirmation
+    # EXECUTION CONFIRMATION
     # =========================
     if not execution_confirmation(df_ltf, direction):
         return None
 
     # =========================
-    # Futures position size
+    # FUTURES POSITION SIZE
     # =========================
     pos_size = 0.0
     if mode == "FUTURES":
@@ -159,10 +213,10 @@ def check_signal(okx, symbol, mode, balance):
         "Phase": phase,
         "Regime": regime,
         "Score": score,
-        "Entry": round(entry,6),
-        "SL": round(sl,6),
-        "TP1": round(tp1,6),
-        "TP2": round(tp2,6),
+        "Entry": round(entry, 6),
+        "SL": round(sl, 6),
+        "TP1": round(tp1, 6),
+        "TP2": round(tp2, 6),
         "Mode": mode,
         "Direction": direction,
         "PositionSize": pos_size
