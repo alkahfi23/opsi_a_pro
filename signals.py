@@ -1,5 +1,5 @@
 # =====================================================
-# OPSI A PRO — SIGNAL ENGINE (FINAL FIXED)
+# OPSI A PRO — SIGNAL ENGINE (PATCHED & BALANCED)
 # =====================================================
 
 from config import (
@@ -22,7 +22,7 @@ from utils import now_wib, is_danger_time
 
 
 # =====================================================
-# EXECUTION CONFIRMATION (LTF)
+# EXECUTION CONFIRMATION (LTF) — EARLIER ENTRY
 # =====================================================
 def execution_confirmation(df_ltf, direction):
     close = df_ltf.close
@@ -34,13 +34,13 @@ def execution_confirmation(df_ltf, direction):
     if direction == "LONG":
         if close.iloc[-1] < ema20.iloc[-1]:
             return False
-        if close.iloc[-1] < close.iloc[-3]:
+        if close.iloc[-1] < close.iloc[-2]:
             return False
 
     if direction == "SHORT":
         if close.iloc[-1] > ema20.iloc[-1]:
             return False
-        if close.iloc[-1] > close.iloc[-3]:
+        if close.iloc[-1] > close.iloc[-2]:
             return False
 
     return True
@@ -65,7 +65,7 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # FETCH DATA (CACHED SAFE)
+    # FETCH DATA (SAFE CACHED)
     # =========================
     try:
         df4h = fetch_ohlcv(symbol, ENTRY_TF, LIMIT_4H)
@@ -91,9 +91,12 @@ def check_signal(symbol, mode, balance):
     score_data = institutional_score(df4h, df1d, direction)
     score = score_data["TotalScore"]
 
+    # dynamic score gate
+    min_score = 75 if score >= 75 else 80
+
     if mode == "SPOT" and score < 70:
         return None
-    if mode == "FUTURES" and score < 80:
+    if mode == "FUTURES" and score < min_score:
         return None
 
     # =========================
@@ -149,14 +152,14 @@ def check_signal(symbol, mode, balance):
             return None
 
     # =========================
-    # ADL CONFIRMATION
+    # ADL CONFIRMATION (SOFTENED)
     # =========================
     adl = accumulation_distribution(df4h)
 
-    if direction == "LONG" and adl.iloc[-1] <= adl.iloc[-10]:
+    if direction == "LONG" and adl.iloc[-1] <= adl.iloc[-20]:
         return None
 
-    if direction == "SHORT" and adl.iloc[-1] >= adl.iloc[-10]:
+    if direction == "SHORT" and adl.iloc[-1] >= adl.iloc[-20]:
         return None
 
     # =========================
@@ -195,13 +198,19 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # FUTURES POSITION SIZE
+    # FUTURES POSITION SIZE (NO HARD KILL)
     # =========================
     pos_size = 0.0
     if mode == "FUTURES":
         pos_size = calculate_futures_position(balance, entry, sl)
+
         if pos_size <= 0:
-            return None
+            return {
+                "SignalType": "MARKET_WARNING",
+                "Symbol": symbol,
+                "Regime": regime,
+                "Message": "Setup valid tapi SL terlalu lebar untuk futures (risk invalid)"
+            }
 
     # =========================
     # FINAL SIGNAL
