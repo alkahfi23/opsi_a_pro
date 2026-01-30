@@ -1,22 +1,41 @@
 # =====================================================
-# OPSI A PRO — HISTORY & AUTO MANAGEMENT
+# OPSI A PRO — HISTORY & AUTO MANAGEMENT (FINAL)
 # =====================================================
+
 import os
 import pandas as pd
-from config import SIGNAL_LOG_FILE
-from exchange import fetch_ohlcv
 
+from config import SIGNAL_LOG_FILE
+from exchange import get_okx
+
+
+# =====================================================
+# LOAD & INIT CSV
+# =====================================================
 def load_signal_history():
     cols = [
-        "Time","Symbol","Phase","Score",
-        "Entry","SL","TP1","TP2",
-        "Status","Mode","Direction","PositionSize","AutoLabel"
+        "Time",
+        "Symbol",
+        "Phase",
+        "Regime",
+        "Score",
+        "Entry",
+        "SL",
+        "TP1",
+        "TP2",
+        "Status",
+        "Mode",
+        "Direction",
+        "PositionSize",
+        "AutoLabel"
     ]
+
     if not os.path.exists(SIGNAL_LOG_FILE):
         pd.DataFrame(columns=cols).to_csv(SIGNAL_LOG_FILE, index=False)
 
     df = pd.read_csv(SIGNAL_LOG_FILE)
 
+    # auto-migrate missing columns
     for c in cols:
         if c not in df.columns:
             df[c] = ""
@@ -25,57 +44,138 @@ def load_signal_history():
     return df
 
 
+# =====================================================
+# SAVE SIGNAL (ANTI DUPLICATE)
+# =====================================================
 def save_signal(sig):
     df = load_signal_history()
 
-    dup = (
+    duplicate = (
         (df["Symbol"] == sig["Symbol"]) &
         (df["Status"] == "OPEN") &
         (df["Mode"] == sig["Mode"]) &
         (df["Direction"] == sig["Direction"])
     )
 
-    if dup.any():
+    if duplicate.any():
         return
 
-    sig["Status"] = "OPEN"
-    sig["AutoLabel"] = "WAIT"
+    record = {
+        "Time": sig.get("Time"),
+        "Symbol": sig.get("Symbol"),
+        "Phase": sig.get("Phase"),
+        "Regime": sig.get("Regime"),
+        "Score": sig.get("Score"),
+        "Entry": sig.get("Entry"),
+        "SL": sig.get("SL"),
+        "TP1": sig.get("TP1"),
+        "TP2": sig.get("TP2"),
+        "Status": "OPEN",
+        "Mode": sig.get("Mode"),
+        "Direction": sig.get("Direction"),
+        "PositionSize": sig.get("PositionSize", 0.0),
+        "AutoLabel": "WAIT"
+    }
 
-    df = pd.concat([df, pd.DataFrame([sig])], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
     df.to_csv(SIGNAL_LOG_FILE, index=False)
 
 
-def auto_close_signals(okx):
+# =====================================================
+# AUTO CLOSE TP / SL
+# =====================================================
+def auto_close_signals():
     df = load_signal_history()
+    okx = get_okx()
     changed = False
 
-    for i,row in df.iterrows():
-        if row["Status"] not in ["OPEN","TP1 HIT"]:
+    for i, row in df.iterrows():
+        if row["Status"] not in ["OPEN", "TP1 HIT"]:
             continue
 
         try:
-            price = okx.fetch_ticker(row["Symbol"])["last"]
-            entry, sl, tp1, tp2 = row["Entry"], row["SL"], row["TP1"], row["TP2"]
+            price = okx.fetch_ticker(row["Symbol"]).get("last")
+            if price is None:
+                continue
+
+            entry = float(row["Entry"])
+            sl = float(row["SL"])
+            tp1 = float(row["TP1"])
+            tp2 = float(row["TP2"])
             direction = row["Direction"]
 
+            # ===== LONG =====
             if direction == "LONG":
                 if price <= sl:
-                    df.at[i,"Status"] = "SL HIT"
+                    df.at[i, "Status"] = "SL HIT"
+                    changed = True
                 elif price >= tp2:
-                    df.at[i,"Status"] = "TP2 HIT"
-                elif price >= tp1:
-                    df.at[i,"Status"] = "TP1 HIT"
+                    df.at[i, "Status"] = "TP2 HIT"
+                    changed = True
+                elif price >= tp1 and row["Status"] == "OPEN":
+                    df.at[i, "Status"] = "TP1 HIT"
+                    changed = True
 
+            # ===== SHORT =====
             else:
                 if price >= sl:
-                    df.at[i,"Status"] = "SL HIT"
+                    df.at[i, "Status"] = "SL HIT"
+                    changed = True
                 elif price <= tp2:
-                    df.at[i,"Status"] = "TP2 HIT"
-                elif price <= tp1:
-                    df.at[i,"Status"] = "TP1 HIT"
+                    df.at[i, "Status"] = "TP2 HIT"
+                    changed = True
+                elif price <= tp1 and row["Status"] == "OPEN":
+                    df.at[i, "Status"] = "TP1 HIT"
+                    changed = True
 
-            changed = True
-        except:
+        except Exception:
+            continue
+
+    if changed:
+        df.to_csv(SIGNAL_LOG_FILE, index=False)
+
+
+# =====================================================
+# AUTO LABEL (SPOT ONLY)
+# =====================================================
+def auto_label_signals():
+    df = load_signal_history()
+    okx = get_okx()
+    changed = False
+
+    for i, row in df.iterrows():
+        if row["Mode"] != "SPOT":
+            continue
+        if row["Status"] != "OPEN":
+            continue
+
+        try:
+            price = okx.fetch_ticker(row["Symbol"]).get("last")
+            if price is None:
+                continue
+
+            entry = float(row["Entry"])
+            sl = float(row["SL"])
+            tp1 = float(row["TP1"])
+
+            if price <= sl:
+                df.at[i, "AutoLabel"] = "INVALIDATED"
+                df.at[i, "Status"] = "CLOSED"
+                changed = True
+            elif abs(price - entry) / entry <= 0.003:
+                df.at[i, "AutoLabel"] = "RETEST"
+                changed = True
+            elif price >= tp1 * 0.95:
+                df.at[i, "AutoLabel"] = "NO REENTRY"
+                changed = True
+            elif price > entry:
+                df.at[i, "AutoLabel"] = "HOLD"
+                changed = True
+            else:
+                df.at[i, "AutoLabel"] = "WAIT"
+                changed = True
+
+        except Exception:
             continue
 
     if changed:
