@@ -74,12 +74,14 @@ elif MODE == "SPOT" and not is_safe_spot_time():
 # =====================================================
 # TABS
 # =====================================================
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📡 Scan Market",
     "📜 Signal History",
     "🎲 Monte Carlo",
-    "🎯 Analisa Single Coin"
+    "🎯 Analisa Single Coin",
+    "🔥 Score Heatmap"
 ])
+
 
 
 # =====================================================
@@ -286,3 +288,40 @@ with tab4:
                 "TP2": res["TP2"],
                 "Position Size": res["PositionSize"]
             })
+
+with tab5:
+    st.subheader("🔥 Institutional Score Heatmap")
+
+    symbols = [
+        s for s, m in okx.markets.items()
+        if m.get("spot") and m.get("active") and s.endswith("/USDT")
+    ][:60]  # jangan terlalu banyak
+
+    if st.button("🎨 Generate Heatmap"):
+        from heatmap import generate_score_heatmap
+
+        with st.spinner("Generating heatmap..."):
+            df = generate_score_heatmap(okx, symbols)
+
+        if df.empty:
+            st.warning("Tidak ada data")
+        else:
+            st.dataframe(
+                df.sort_values("Score", ascending=False),
+                use_container_width=True
+            )
+
+            fig = px.imshow(
+                df.set_index("Symbol")[["Score"]],
+                color_continuous_scale=[
+                    [0.0, "#7a0c0c"],   # merah
+                    [0.5, "#e6a700"],   # kuning
+                    [0.7, "#4caf50"],   # hijau
+                    [1.0, "#00e676"]    # hijau terang
+                ],
+                aspect="auto",
+                title="Institutional Score Heatmap"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
