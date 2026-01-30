@@ -5,6 +5,7 @@ import streamlit as st
 import time
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 
 from exchange import get_okx
 from utils import (
