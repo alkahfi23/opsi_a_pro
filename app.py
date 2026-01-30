@@ -6,7 +6,6 @@ import time
 import pandas as pd
 import plotly.graph_objects as go
 
-
 from exchange import get_okx
 from utils import (
     is_danger_time,
@@ -20,11 +19,11 @@ from history import (
     load_signal_history,
     save_signal,
     auto_close_signals,
-    auto_label_signals
+    merge_signal_history
 )
 from montecarlo import run_monte_carlo
-from analyze_single_coin import analyze_single_coin   # 👈 SINGLE COIN
-from history import merge_signal_history
+from analyze_single_coin import analyze_single_coin
+
 
 # =====================================================
 # PAGE
@@ -32,17 +31,29 @@ from history import merge_signal_history
 st.set_page_config("OPSI A PRO — MODULAR", layout="wide")
 st.title("🚀 OPSI A PRO — SPOT & FUTURES (Institutional)")
 
+
 # =====================================================
-# INIT
+# INIT EXCHANGE
 # =====================================================
 okx = get_okx()
 
-# auto maintenance
-auto_close_signals()
-auto_label_signals()
+# =====================================================
+# AUTO MAINTENANCE (SAFE CALL)
+# =====================================================
+try:
+    auto_close_signals(okx)
+except Exception:
+    pass
 
+# =====================================================
+# MODE & BALANCE
+# =====================================================
 MODE = st.radio("🧭 Trading Mode", ["SPOT", "FUTURES"], horizontal=True)
-BALANCE = st.number_input("💰 Account Balance (USDT)", value=10000.0, step=100.0)
+BALANCE = st.number_input(
+    "💰 Account Balance (USDT)",
+    value=10000.0,
+    step=100.0
+)
 
 hour = wib_hour()
 
@@ -59,6 +70,7 @@ elif MODE == "FUTURES" and not is_safe_futures_time():
 elif MODE == "SPOT" and not is_safe_spot_time():
     st.warning("⚠️ Spot di luar jam ideal")
 
+
 # =====================================================
 # TABS
 # =====================================================
@@ -68,6 +80,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "🎲 Monte Carlo",
     "🎯 Analisa Single Coin"
 ])
+
 
 # =====================================================
 # TAB 1 — SCAN MARKET
@@ -87,7 +100,10 @@ with tab1:
         for i, symbol in enumerate(symbols, 1):
             status.info(f"Scanning {symbol} ({i}/{total})")
 
-            sig = check_signal(symbol, MODE, BALANCE)
+            try:
+                sig = check_signal(symbol, MODE, BALANCE)
+            except Exception:
+                continue
 
             if sig and sig.get("SignalType") == "TRADE_EXECUTION":
                 save_signal(sig)
@@ -101,6 +117,7 @@ with tab1:
             st.dataframe(pd.DataFrame(found), use_container_width=True)
         else:
             st.warning("Tidak ada setup A+ ditemukan")
+
 
 # =====================================================
 # TAB 2 — HISTORY
@@ -141,7 +158,9 @@ with tab2:
                 added = merge_signal_history(upload_df)
 
                 if added > 0:
-                    st.success(f"✅ Restore berhasil: {added} signal baru ditambahkan")
+                    st.success(
+                        f"✅ Restore berhasil: {added} signal baru ditambahkan"
+                    )
                 else:
                     st.info("ℹ️ Tidak ada signal baru (semua sudah ada)")
 
@@ -152,15 +171,13 @@ with tab2:
 
     st.divider()
 
-    # =========================
-    # 📥 DOWNLOAD BACKUP
-    # =========================
     st.download_button(
         "⬇️ Download Full Signal History",
         df.to_csv(index=False),
         "signal_history_backup.csv",
         mime="text/csv"
     )
+
 
 # =====================================================
 # TAB 3 — MONTE CARLO
@@ -174,8 +191,15 @@ with tab3:
     if trade_results.empty:
         st.warning("Trade result belum cukup")
     else:
-        risk = st.slider("Risk / Trade (%)", 0.2, 3.0, 1.0) / 100
-        trades = st.slider("Trades / Simulation", 50, 500, 300)
+        risk = st.slider(
+            "Risk / Trade (%)",
+            0.2, 3.0, 1.0
+        ) / 100
+
+        trades = st.slider(
+            "Trades / Simulation",
+            50, 500, 300
+        )
 
         if st.button("🎲 Run Monte Carlo"):
             res = run_monte_carlo(
@@ -208,11 +232,12 @@ with tab3:
                     )
                 st.plotly_chart(fig, use_container_width=True)
 
+
 # =====================================================
 # TAB 4 — ANALISA SINGLE COIN
 # =====================================================
 with tab4:
-    st.subheader("🎯 Analisa Single Coin (Logic Sama dengan Scanner)")
+    st.subheader("🎯 Analisa Single Coin")
 
     symbols = [
         s for s, m in okx.markets.items()
@@ -223,7 +248,11 @@ with tab4:
     with col1:
         symbol = st.selectbox("Pilih Coin", symbols)
     with col2:
-        mode_an = st.radio("Mode Analisa", ["SPOT", "FUTURES"], horizontal=True)
+        mode_an = st.radio(
+            "Mode Analisa",
+            ["SPOT", "FUTURES"],
+            horizontal=True
+        )
 
     bal_an = st.number_input(
         "Balance untuk Analisa (USDT)",
