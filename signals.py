@@ -1,12 +1,14 @@
 # =====================================================
 # OPSI A PRO — SIGNAL ENGINE
-# FUTURES WITH LTF ENTRY (PROP-FIRM GRADE, PATCHED)
+# FUTURES WITH LTF ENTRY + LTF SL (DUAL SL SYSTEM)
+# PROP-FIRM GRADE
 # =====================================================
 
 from config import (
     ENTRY_TF, DAILY_TF, LTF_TF,
     LIMIT_4H, LIMIT_1D, LIMIT_LTF,
-    TP1_R, TP2_R, ZONE_BUFFER, SR_LOOKBACK
+    TP1_R, TP2_R, ZONE_BUFFER, SR_LOOKBACK,
+    FUTURES_MAX_RISK
 )
 
 from exchange import fetch_ohlcv
@@ -23,38 +25,45 @@ from utils import now_wib, is_danger_time
 
 
 # =====================================================
-# LTF FUTURES ENTRY (EXECUTION ENGINE)
+# LTF FUTURES ENTRY
 # =====================================================
 def futures_ltf_entry(df_ltf, direction):
-    """
-    Return entry price or None
-
-    Logic:
-    - EMA20 reclaim / reject
-    - Strong momentum confirmation
-    """
-
     close = df_ltf.close
     ema20 = close.ewm(span=20).mean()
 
     if len(close) < 30:
         return None
 
-    # LONG execution
     if direction == "LONG":
-        if (
-            close.iloc[-1] > ema20.iloc[-1] and
-            close.iloc[-1] > close.iloc[-3]
-        ):
+        if close.iloc[-1] > ema20.iloc[-1] and close.iloc[-1] > close.iloc[-3]:
             return close.iloc[-1]
 
-    # SHORT execution
     if direction == "SHORT":
-        if (
-            close.iloc[-1] < ema20.iloc[-1] and
-            close.iloc[-1] < close.iloc[-3]
-        ):
+        if close.iloc[-1] < ema20.iloc[-1] and close.iloc[-1] < close.iloc[-3]:
             return close.iloc[-1]
+
+    return None
+
+
+# =====================================================
+# LTF SL (RISK STOP FOR FUTURES)
+# =====================================================
+def futures_ltf_sl(df_ltf, direction, lookback=5):
+    """
+    Futures execution SL using recent LTF structure
+    """
+
+    if len(df_ltf) < lookback + 5:
+        return None
+
+    lows = df_ltf.low.iloc[-lookback:]
+    highs = df_ltf.high.iloc[-lookback:]
+
+    if direction == "LONG":
+        return lows.min()
+
+    if direction == "SHORT":
+        return highs.max()
 
     return None
 
@@ -97,7 +106,7 @@ def check_signal(symbol, mode, balance):
     direction = "LONG" if trend.iloc[-1] == 1 else "SHORT"
 
     # =========================
-    # INSTITUTIONAL SCORE
+    # SCORE
     # =========================
     score_data = institutional_score(df4h, df1d, direction)
     score = score_data["TotalScore"]
@@ -108,13 +117,10 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # MARKET REGIME
+    # REGIME
     # =========================
     regime = detect_market_regime(df4h, df1d, score_data)
 
-    # =========================
-    # REGIME SHIFT ALERT
-    # =========================
     shift = detect_regime_shift(df4h, df1d)
     if shift:
         return {
@@ -135,31 +141,14 @@ def check_signal(symbol, mode, balance):
             "Message": "SPOT short = distribution (no buy)"
         }
 
-    if mode == "SPOT" and regime not in [
-        "REGIME_ACCUMULATION",
-        "REGIME_MARKUP"
-    ]:
-        return {
-            "SignalType": "MARKET_WARNING",
-            "Symbol": symbol,
-            "Regime": regime,
-            "Message": "No buy zone (institutional distribution)"
-        }
-
     if mode == "FUTURES":
-        if direction == "LONG" and regime not in [
-            "REGIME_ACCUMULATION",
-            "REGIME_MARKUP"
-        ]:
+        if direction == "LONG" and regime not in ["REGIME_ACCUMULATION", "REGIME_MARKUP"]:
             return None
-        if direction == "SHORT" and regime not in [
-            "REGIME_DISTRIBUTION",
-            "REGIME_MARKDOWN"
-        ]:
+        if direction == "SHORT" and regime not in ["REGIME_DISTRIBUTION", "REGIME_MARKDOWN"]:
             return None
 
     # =========================
-    # ADL CONFIRMATION (SOFT)
+    # ADL CONFIRMATION
     # =========================
     adl = accumulation_distribution(df4h)
 
@@ -169,16 +158,15 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # ENTRY PRICE
+    # ENTRY
     # =========================
-    entry = df4h.close.iloc[-1]  # default (SPOT)
+    entry = df4h.close.iloc[-1]
 
     if mode == "FUTURES":
         entry_ltf = futures_ltf_entry(df_ltf, direction)
         if not entry_ltf:
             return None
 
-        # anti-chasing guard (max 1% from HTF price)
         htf_price = df4h.close.iloc[-1]
         if abs(entry_ltf - htf_price) / htf_price > 0.01:
             return None
@@ -186,48 +174,62 @@ def check_signal(symbol, mode, balance):
         entry = entry_ltf
 
     # =========================
-    # SL STRUCTURE (HTF)
+    # HTF SL (INVALIDATION)
     # =========================
     if direction == "LONG":
-        supports = [
-            s for s in find_support(df1d, SR_LOOKBACK)
-            if s < entry
-        ]
+        supports = [s for s in find_support(df1d, SR_LOOKBACK) if s < entry]
         if not supports:
             return None
-
-        sl = max(supports) * (1 - ZONE_BUFFER)
-        tp1 = entry + (entry - sl) * TP1_R
-        tp2 = entry + (entry - sl) * TP2_R
+        sl_htf = max(supports) * (1 - ZONE_BUFFER)
         phase = "AKUMULASI_INSTITUSI"
-
     else:
-        resistances = [
-            r for r in find_resistance(df1d, SR_LOOKBACK)
-            if r > entry
-        ]
+        resistances = [r for r in find_resistance(df1d, SR_LOOKBACK) if r > entry]
         if not resistances:
             return None
-
-        sl = min(resistances) * (1 + ZONE_BUFFER)
-        tp1 = entry - (sl - entry) * TP1_R
-        tp2 = entry - (sl - entry) * TP2_R
+        sl_htf = min(resistances) * (1 + ZONE_BUFFER)
         phase = "DISTRIBUSI_INSTITUSI"
 
     # =========================
-    # FUTURES POSITION SIZE
+    # FUTURES LTF SL (EXECUTION SL)
     # =========================
-    pos_size = 0.0
-    if mode == "FUTURES":
-        pos_size = calculate_futures_position(balance, entry, sl)
+    sl_exec = sl_htf
 
-        if pos_size <= 0:
+    if mode == "FUTURES":
+        sl_ltf = futures_ltf_sl(df_ltf, direction)
+
+        if not sl_ltf:
+            return None
+
+        stop_pct = abs(entry - sl_ltf) / entry
+
+        if stop_pct <= FUTURES_MAX_RISK:
+            sl_exec = sl_ltf
+        else:
             return {
                 "SignalType": "MARKET_WARNING",
                 "Symbol": symbol,
                 "Regime": regime,
-                "Message": "Setup valid tapi SL masih terlalu lebar untuk futures"
+                "Message": f"Market valid tapi LTF SL masih terlalu jauh ({stop_pct*100:.2f}%)"
             }
+
+    # =========================
+    # TARGETS (FROM EXEC SL)
+    # =========================
+    if direction == "LONG":
+        tp1 = entry + (entry - sl_exec) * TP1_R
+        tp2 = entry + (entry - sl_exec) * TP2_R
+    else:
+        tp1 = entry - (sl_exec - entry) * TP1_R
+        tp2 = entry - (sl_exec - entry) * TP2_R
+
+    # =========================
+    # POSITION SIZE
+    # =========================
+    pos_size = 0.0
+    if mode == "FUTURES":
+        pos_size = calculate_futures_position(balance, entry, sl_exec)
+        if pos_size <= 0:
+            return None
 
     # =========================
     # FINAL SIGNAL
@@ -240,7 +242,8 @@ def check_signal(symbol, mode, balance):
         "Regime": regime,
         "Score": score,
         "Entry": round(entry, 6),
-        "SL": round(sl, 6),
+        "SL": round(sl_exec, 6),              # EXECUTION SL
+        "SL_Invalidation": round(sl_htf, 6),  # STRUCTURE SL
         "TP1": round(tp1, 6),
         "TP2": round(tp2, 6),
         "Mode": mode,
