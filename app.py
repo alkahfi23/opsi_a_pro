@@ -75,13 +75,15 @@ elif MODE == "SPOT" and not is_safe_spot_time():
 # =====================================================
 # TABS
 # =====================================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📡 Scan Market",
     "📜 Signal History",
     "🎲 Monte Carlo",
     "🎯 Analisa Single Coin",
-    "🔥 Score Heatmap"
+    "🔥 Score Heatmap",
+    "🔄 Δ Score (Rotation)"
 ])
+
 
 
 
@@ -326,3 +328,48 @@ with tab5:
 
             st.plotly_chart(fig, use_container_width=True)
 
+with tab6:
+    st.subheader("🔄 Institutional Rotation (Δ Score)")
+
+    symbols = [
+        s for s, m in okx.markets.items()
+        if m.get("spot") and m.get("active") and s.endswith("/USDT")
+    ][:60]
+
+    from heatmap_delta import (
+        take_score_snapshot,
+        compute_score_delta
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📸 Take Snapshot"):
+            snap = take_score_snapshot(okx, symbols)
+            st.success(f"Snapshot saved ({len(snap)} symbols)")
+
+    with col2:
+        if st.button("🔥 Show Rotation"):
+            df_delta = compute_score_delta()
+
+            if df_delta is None or df_delta.empty:
+                st.warning("Belum cukup snapshot (ambil 2x)")
+            else:
+                df_delta = df_delta.sort_values("Delta", ascending=False)
+
+                st.dataframe(df_delta, use_container_width=True)
+
+                fig = px.imshow(
+                    df_delta.set_index("Symbol")[["Delta"]],
+                    aspect="auto",
+                    color_continuous_scale=[
+                        [0.0, "#7a0c0c"],   # merah (exit)
+                        [0.4, "#ff9800"],   # distribusi
+                        [0.5, "#9e9e9e"],   # netral
+                        [0.7, "#4caf50"],   # akumulasi
+                        [1.0, "#00e676"]    # agresif
+                    ],
+                    title="Δ Institutional Score (Rotation)"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
