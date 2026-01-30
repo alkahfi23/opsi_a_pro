@@ -6,6 +6,7 @@ import time
 import pandas as pd
 import plotly.graph_objects as go
 
+
 from exchange import get_okx
 from utils import (
     is_danger_time,
@@ -23,6 +24,7 @@ from history import (
 )
 from montecarlo import run_monte_carlo
 from analyze_single_coin import analyze_single_coin   # 👈 SINGLE COIN
+from history import merge_signal_history
 
 # =====================================================
 # PAGE
@@ -104,6 +106,8 @@ with tab1:
 # TAB 2 — HISTORY
 # =====================================================
 with tab2:
+    st.subheader("📜 Signal History")
+
     df = load_signal_history()
 
     st.metric("Total Signals", len(df))
@@ -114,10 +118,48 @@ with tab2:
         use_container_width=True
     )
 
+    st.divider()
+
+    # =========================
+    # 📤 RESTORE / IMPORT CSV
+    # =========================
+    st.subheader("📤 Restore Riwayat dari CSV")
+
+    uploaded = st.file_uploader(
+        "Upload file signal_history.csv lama",
+        type=["csv"]
+    )
+
+    if uploaded:
+        try:
+            upload_df = pd.read_csv(uploaded)
+
+            st.markdown("**Preview file:**")
+            st.dataframe(upload_df.head(), use_container_width=True)
+
+            if st.button("♻️ Merge ke History"):
+                added = merge_signal_history(upload_df)
+
+                if added > 0:
+                    st.success(f"✅ Restore berhasil: {added} signal baru ditambahkan")
+                else:
+                    st.info("ℹ️ Tidak ada signal baru (semua sudah ada)")
+
+                st.experimental_rerun()
+
+        except Exception as e:
+            st.error(f"❌ Gagal membaca CSV: {e}")
+
+    st.divider()
+
+    # =========================
+    # 📥 DOWNLOAD BACKUP
+    # =========================
     st.download_button(
-        "⬇️ Download History",
+        "⬇️ Download Full Signal History",
         df.to_csv(index=False),
-        "signal_history.csv"
+        "signal_history_backup.csv",
+        mime="text/csv"
     )
 
 # =====================================================
