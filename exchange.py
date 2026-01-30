@@ -1,6 +1,4 @@
-# =====================================================
-# OPSI A PRO — EXCHANGE
-# =====================================================
+# exchange.py
 import ccxt
 import pandas as pd
 import streamlit as st
@@ -12,7 +10,8 @@ def get_okx():
     return ex
 
 @st.cache_data(ttl=300)
-def fetch_ohlcv(okx, symbol, tf, limit):
+def fetch_ohlcv(symbol, tf, limit):
+    okx = get_okx()   # ambil dari cache_resource
     return pd.DataFrame(
         okx.fetch_ohlcv(symbol, tf, limit=limit),
         columns=["t","open","high","low","close","volume"]
