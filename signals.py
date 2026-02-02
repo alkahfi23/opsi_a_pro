@@ -1,7 +1,7 @@
 # =====================================================
 # OPSI A PRO — SIGNAL ENGINE
 # FUTURES WITH LTF ENTRY + LTF SL (DUAL SL)
-# FINAL | CONFIG-SAFE
+# FINAL | CONFIG-SAFE | INSTITUTIONAL GRADE
 # =====================================================
 
 from config import (
@@ -59,14 +59,11 @@ def futures_ltf_sl(df_ltf, direction, lookback=5):
     if len(df_ltf) < lookback + 5:
         return None
 
-    lows = df_ltf.low.iloc[-lookback:]
-    highs = df_ltf.high.iloc[-lookback:]
-
     if direction == "LONG":
-        return lows.min()
+        return df_ltf.low.iloc[-lookback:].min()
 
     if direction == "SHORT":
-        return highs.max()
+        return df_ltf.high.iloc[-lookback:].max()
 
     return None
 
@@ -113,10 +110,13 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # REGIME
+    # REGIME (FREEZE)
     # =========================
     regime = detect_market_regime(df4h, df1d, score_data)
 
+    # =========================
+    # REGIME SHIFT ALERT
+    # =========================
     shift = detect_regime_shift(df4h, df1d)
     if shift:
         return {
@@ -188,8 +188,7 @@ def check_signal(symbol, mode, balance):
         if not sl_ltf:
             return None
 
-        stop_pct = abs(entry - sl_ltf) / entry
-        if stop_pct > FUTURES_MAX_RISK:
+        if abs(entry - sl_ltf) / entry > FUTURES_MAX_RISK:
             return None
 
         sl_exec = sl_ltf
@@ -214,23 +213,17 @@ def check_signal(symbol, mode, balance):
             return None
 
     # =========================
-    # FINAL SIGNAL
+    # FINAL SIGNAL (FREEZE SNAPSHOT)
     # =========================
     return {
         "SignalType": "TRADE_EXECUTION",
-    # 🔒 FREEZE (ENTRY SNAPSHOT)
-        "Regime": regime,
-    # 🔄 INITIAL CURRENT REGIME = ENTRY REGIME
-        "CurrentRegime": regime,
-    # ⚠️ BELUM ADA SHIFT SAAT ENTRY
-        "RegimeShift": False,
         "Time": now_wib(),
         "Symbol": symbol,
         "Phase": phase,
-        "Regime": regime,
+        "Regime": regime,              # 🔒 FREEZE
         "Score": score,
         "Entry": round(entry, 6),
-        "SL": round(sl_exec, 6),
+        "SL": round(sl_exec, 6),       # EXECUTION SL
         "SL_Invalidation": round(sl_htf, 6),
         "TP1": round(tp1, 6),
         "TP2": round(tp2, 6),
