@@ -5,9 +5,9 @@
 # =====================================================
 # TIMEFRAME
 # =====================================================
-ENTRY_TF = "4h"
-DAILY_TF = "1d"
-LTF_TF   = "15m"        # default execution TF (can switch to 5m)
+ENTRY_TF = "4h"          # HTF structure
+DAILY_TF = "1d"          # Macro regime
+LTF_TF   = "15m"         # Default execution TF (can switch to 5m)
 
 LIMIT_4H  = 200
 LIMIT_1D  = 200
@@ -28,7 +28,7 @@ VO_SLOW = 28
 # SUPPORT / RESISTANCE
 # =====================================================
 SR_LOOKBACK = 5
-ZONE_BUFFER = 0.01     # 1% buffer beyond structure
+ZONE_BUFFER = 0.01       # 1% buffer beyond structure
 
 
 # =====================================================
@@ -52,7 +52,7 @@ MAX_SCAN_SYMBOLS = 120
 # Real equity risk per trade (0.5%)
 FUTURES_RISK_PCT = 0.005
 
-# 🔥 HARD LEVERAGE CAP
+# 🔥 HARD LEVERAGE CAP (MAX 50x)
 FUTURES_LEVERAGE = 50
 
 # Max stop loss distance (1.5%)
@@ -64,15 +64,43 @@ FUTURES_MAX_NOTIONAL = 0.25
 
 
 # =====================================================
+# FUTURES — BIG COIN FILTER (REKOMENDASI KERAS)
+# =====================================================
+# Futures ONLY allowed for high-liquidity institutional coins
+# Small / meme / low OI coins → AUTO SKIP for futures
+
+FUTURES_ALLOWED_SYMBOLS = [
+    # CORE MAJORS
+    "BTC/USDT",
+    "ETH/USDT",
+
+    # LARGE CAP LIQUID
+    "BNB/USDT",
+    "SOL/USDT",
+    "XRP/USDT",
+    "ADA/USDT",
+    "DOGE/USDT",
+
+    # INSTITUTIONAL ALTS
+    "LINK/USDT",
+    "AVAX/USDT",
+    "MATIC/USDT",
+    "ARB/USDT",
+    "OP/USDT",
+    "APT/USDT"
+]
+
+
+# =====================================================
 # FUTURES EXECUTION (LTF ENTRY)
 # =====================================================
-FUTURES_EXEC_TF = "15m"      # recommended: 15m (safe), 5m (aggressive)
+FUTURES_EXEC_TF   = "15m"     # recommended: 15m (safe), 5m (aggressive)
 FUTURES_LTF_LIMIT = 200
 
 
 # =====================================================
 # FILE PATH
 # =====================================================
-SIGNAL_LOG_FILE     = "signal_history.csv"
-TRADE_RESULT_FILE   = "trade_results.csv"
-FUTURES_TRADE_FILE  = "futures_trades.csv"
+SIGNAL_LOG_FILE    = "signal_history.csv"
+TRADE_RESULT_FILE = "trade_results.csv"
+FUTURES_TRADE_FILE = "futures_trades.csv"
