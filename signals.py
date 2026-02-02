@@ -1,16 +1,21 @@
 # =====================================================
 # OPSI A PRO — SIGNAL ENGINE
-# FUTURES WITH LTF ENTRY + LTF SL (DUAL SL SYSTEM)
-# PROP-FIRM GRADE
+# FUTURES WITH LTF ENTRY + LTF SL (DUAL SL)
+# FINAL | CONFIG-SAFE
 # =====================================================
 
 from config import (
-    ENTRY_TF, DAILY_TF, LTF_TF,
-    LIMIT_4H, LIMIT_1D, LIMIT_LTF,
-    TP1_R, TP2_R,
-    ZONE_BUFFER, SR_LOOKBACK,
-    FUTURES_MAX_RISK,
-    FUTURES_ALLOWED_SYMBOLS
+    ENTRY_TF,
+    DAILY_TF,
+    FUTURES_EXEC_TF,
+    LIMIT_4H,
+    LIMIT_1D,
+    FUTURES_LTF_LIMIT,
+    TP1_R,
+    TP2_R,
+    ZONE_BUFFER,
+    SR_LOOKBACK,
+    FUTURES_MAX_RISK
 )
 
 from exchange import fetch_ohlcv
@@ -48,12 +53,9 @@ def futures_ltf_entry(df_ltf, direction):
 
 
 # =====================================================
-# LTF SL (EXECUTION SL FOR FUTURES)
+# LTF SL (EXECUTION SL)
 # =====================================================
 def futures_ltf_sl(df_ltf, direction, lookback=5):
-    """
-    Futures execution SL using recent LTF structure
-    """
     if len(df_ltf) < lookback + 5:
         return None
 
@@ -70,22 +72,9 @@ def futures_ltf_sl(df_ltf, direction, lookback=5):
 
 
 # =====================================================
-# MAIN SIGNAL CHECK
+# MAIN SIGNAL
 # =====================================================
 def check_signal(symbol, mode, balance):
-    """
-    Return:
-    - None
-    - MARKET_WARNING
-    - REGIME_SHIFT
-    - TRADE_EXECUTION
-    """
-
-    # =========================
-    # FUTURES BIG COIN FILTER
-    # =========================
-    if mode == "FUTURES" and symbol not in FUTURES_ALLOWED_SYMBOLS:
-        return None
 
     # =========================
     # FUTURES KILL SWITCH
@@ -99,7 +88,7 @@ def check_signal(symbol, mode, balance):
     try:
         df4h = fetch_ohlcv(symbol, ENTRY_TF, LIMIT_4H)
         df1d = fetch_ohlcv(symbol, DAILY_TF, LIMIT_1D)
-        df_ltf = fetch_ohlcv(symbol, LTF_TF, LIMIT_LTF)
+        df_ltf = fetch_ohlcv(symbol, FUTURES_EXEC_TF, FUTURES_LTF_LIMIT)
     except Exception:
         return None
 
@@ -124,7 +113,7 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # MARKET REGIME
+    # REGIME
     # =========================
     regime = detect_market_regime(df4h, df1d, score_data)
 
@@ -138,42 +127,28 @@ def check_signal(symbol, mode, balance):
         }
 
     # =========================
-    # MODE PERMISSION
+    # MODE FILTER
     # =========================
     if mode == "SPOT" and direction == "SHORT":
-        return {
-            "SignalType": "MARKET_WARNING",
-            "Symbol": symbol,
-            "Regime": regime,
-            "Message": "SPOT short = distribution (no buy)"
-        }
+        return None
 
     if mode == "FUTURES":
-        if direction == "LONG" and regime not in [
-            "REGIME_ACCUMULATION",
-            "REGIME_MARKUP"
-        ]:
+        if direction == "LONG" and regime not in ["REGIME_ACCUMULATION", "REGIME_MARKUP"]:
             return None
-
-        if direction == "SHORT" and regime not in [
-            "REGIME_DISTRIBUTION",
-            "REGIME_MARKDOWN"
-        ]:
+        if direction == "SHORT" and regime not in ["REGIME_DISTRIBUTION", "REGIME_MARKDOWN"]:
             return None
 
     # =========================
     # ADL CONFIRMATION
     # =========================
     adl = accumulation_distribution(df4h)
-
     if direction == "LONG" and adl.iloc[-1] <= adl.iloc[-20]:
         return None
-
     if direction == "SHORT" and adl.iloc[-1] >= adl.iloc[-20]:
         return None
 
     # =========================
-    # ENTRY PRICE
+    # ENTRY
     # =========================
     entry = df4h.close.iloc[-1]
 
@@ -182,14 +157,13 @@ def check_signal(symbol, mode, balance):
         if not entry_ltf:
             return None
 
-        htf_price = df4h.close.iloc[-1]
-        if abs(entry_ltf - htf_price) / htf_price > 0.01:
+        if abs(entry_ltf - entry) / entry > 0.01:
             return None
 
         entry = entry_ltf
 
     # =========================
-    # HTF SL (INVALIDATION SL)
+    # HTF SL (INVALIDATION)
     # =========================
     if direction == "LONG":
         supports = [s for s in find_support(df1d, SR_LOOKBACK) if s < entry]
@@ -205,7 +179,7 @@ def check_signal(symbol, mode, balance):
         phase = "DISTRIBUSI_INSTITUSI"
 
     # =========================
-    # LTF EXECUTION SL (FUTURES)
+    # LTF SL (EXECUTION)
     # =========================
     sl_exec = sl_htf
 
@@ -215,19 +189,13 @@ def check_signal(symbol, mode, balance):
             return None
 
         stop_pct = abs(entry - sl_ltf) / entry
+        if stop_pct > FUTURES_MAX_RISK:
+            return None
 
-        if stop_pct <= FUTURES_MAX_RISK:
-            sl_exec = sl_ltf
-        else:
-            return {
-                "SignalType": "MARKET_WARNING",
-                "Symbol": symbol,
-                "Regime": regime,
-                "Message": f"LTF SL terlalu lebar ({stop_pct*100:.2f}%)"
-            }
+        sl_exec = sl_ltf
 
     # =========================
-    # TARGETS (BASED ON EXEC SL)
+    # TARGET
     # =========================
     if direction == "LONG":
         tp1 = entry + (entry - sl_exec) * TP1_R
@@ -256,8 +224,8 @@ def check_signal(symbol, mode, balance):
         "Regime": regime,
         "Score": score,
         "Entry": round(entry, 6),
-        "SL": round(sl_exec, 6),              # Execution SL
-        "SL_Invalidation": round(sl_htf, 6),  # Structural SL
+        "SL": round(sl_exec, 6),
+        "SL_Invalidation": round(sl_htf, 6),
         "TP1": round(tp1, 6),
         "TP2": round(tp2, 6),
         "Mode": mode,
