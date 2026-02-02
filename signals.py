@@ -7,8 +7,10 @@
 from config import (
     ENTRY_TF, DAILY_TF, LTF_TF,
     LIMIT_4H, LIMIT_1D, LIMIT_LTF,
-    TP1_R, TP2_R, ZONE_BUFFER, SR_LOOKBACK,
-    FUTURES_MAX_RISK
+    TP1_R, TP2_R,
+    ZONE_BUFFER, SR_LOOKBACK,
+    FUTURES_MAX_RISK,
+    FUTURES_ALLOWED_SYMBOLS
 )
 
 from exchange import fetch_ohlcv
@@ -46,13 +48,12 @@ def futures_ltf_entry(df_ltf, direction):
 
 
 # =====================================================
-# LTF SL (RISK STOP FOR FUTURES)
+# LTF SL (EXECUTION SL FOR FUTURES)
 # =====================================================
 def futures_ltf_sl(df_ltf, direction, lookback=5):
     """
     Futures execution SL using recent LTF structure
     """
-
     if len(df_ltf) < lookback + 5:
         return None
 
@@ -81,6 +82,12 @@ def check_signal(symbol, mode, balance):
     """
 
     # =========================
+    # FUTURES BIG COIN FILTER
+    # =========================
+    if mode == "FUTURES" and symbol not in FUTURES_ALLOWED_SYMBOLS:
+        return None
+
+    # =========================
     # FUTURES KILL SWITCH
     # =========================
     if mode == "FUTURES" and is_danger_time():
@@ -106,7 +113,7 @@ def check_signal(symbol, mode, balance):
     direction = "LONG" if trend.iloc[-1] == 1 else "SHORT"
 
     # =========================
-    # SCORE
+    # INSTITUTIONAL SCORE
     # =========================
     score_data = institutional_score(df4h, df1d, direction)
     score = score_data["TotalScore"]
@@ -117,7 +124,7 @@ def check_signal(symbol, mode, balance):
         return None
 
     # =========================
-    # REGIME
+    # MARKET REGIME
     # =========================
     regime = detect_market_regime(df4h, df1d, score_data)
 
@@ -142,9 +149,16 @@ def check_signal(symbol, mode, balance):
         }
 
     if mode == "FUTURES":
-        if direction == "LONG" and regime not in ["REGIME_ACCUMULATION", "REGIME_MARKUP"]:
+        if direction == "LONG" and regime not in [
+            "REGIME_ACCUMULATION",
+            "REGIME_MARKUP"
+        ]:
             return None
-        if direction == "SHORT" and regime not in ["REGIME_DISTRIBUTION", "REGIME_MARKDOWN"]:
+
+        if direction == "SHORT" and regime not in [
+            "REGIME_DISTRIBUTION",
+            "REGIME_MARKDOWN"
+        ]:
             return None
 
     # =========================
@@ -154,11 +168,12 @@ def check_signal(symbol, mode, balance):
 
     if direction == "LONG" and adl.iloc[-1] <= adl.iloc[-20]:
         return None
+
     if direction == "SHORT" and adl.iloc[-1] >= adl.iloc[-20]:
         return None
 
     # =========================
-    # ENTRY
+    # ENTRY PRICE
     # =========================
     entry = df4h.close.iloc[-1]
 
@@ -174,7 +189,7 @@ def check_signal(symbol, mode, balance):
         entry = entry_ltf
 
     # =========================
-    # HTF SL (INVALIDATION)
+    # HTF SL (INVALIDATION SL)
     # =========================
     if direction == "LONG":
         supports = [s for s in find_support(df1d, SR_LOOKBACK) if s < entry]
@@ -190,13 +205,12 @@ def check_signal(symbol, mode, balance):
         phase = "DISTRIBUSI_INSTITUSI"
 
     # =========================
-    # FUTURES LTF SL (EXECUTION SL)
+    # LTF EXECUTION SL (FUTURES)
     # =========================
     sl_exec = sl_htf
 
     if mode == "FUTURES":
         sl_ltf = futures_ltf_sl(df_ltf, direction)
-
         if not sl_ltf:
             return None
 
@@ -209,11 +223,11 @@ def check_signal(symbol, mode, balance):
                 "SignalType": "MARKET_WARNING",
                 "Symbol": symbol,
                 "Regime": regime,
-                "Message": f"Market valid tapi LTF SL masih terlalu jauh ({stop_pct*100:.2f}%)"
+                "Message": f"LTF SL terlalu lebar ({stop_pct*100:.2f}%)"
             }
 
     # =========================
-    # TARGETS (FROM EXEC SL)
+    # TARGETS (BASED ON EXEC SL)
     # =========================
     if direction == "LONG":
         tp1 = entry + (entry - sl_exec) * TP1_R
@@ -242,8 +256,8 @@ def check_signal(symbol, mode, balance):
         "Regime": regime,
         "Score": score,
         "Entry": round(entry, 6),
-        "SL": round(sl_exec, 6),              # EXECUTION SL
-        "SL_Invalidation": round(sl_htf, 6),  # STRUCTURE SL
+        "SL": round(sl_exec, 6),              # Execution SL
+        "SL_Invalidation": round(sl_htf, 6),  # Structural SL
         "TP1": round(tp1, 6),
         "TP2": round(tp2, 6),
         "Mode": mode,
