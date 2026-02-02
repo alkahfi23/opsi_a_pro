@@ -1,5 +1,6 @@
 # =====================================================
-# OPSI A PRO — MAIN APP (FINAL STABLE)
+# OPSI A PRO — MAIN APP
+# FINAL | STABLE | INSTITUTIONAL GRADE
 # =====================================================
 
 import streamlit as st
@@ -8,9 +9,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-# =====================================================
-# INTERNAL MODULES
-# =====================================================
 from exchange import get_okx
 from utils import (
     is_danger_time,
@@ -18,7 +16,13 @@ from utils import (
     is_safe_futures_time,
     wib_hour
 )
-from config import RATE_LIMIT_DELAY, MAX_SCAN_SYMBOLS
+
+from config import (
+    RATE_LIMIT_DELAY,
+    MAX_SCAN_SYMBOLS,
+    FUTURES_BIG_COINS
+)
+
 from signals import check_signal
 from history import (
     load_signal_history,
@@ -26,35 +30,45 @@ from history import (
     auto_close_signals,
     merge_signal_history
 )
+
 from montecarlo import run_monte_carlo
 from analyze_single_coin import analyze_single_coin
 
+
 # =====================================================
-# PAGE CONFIG
+# PAGE
 # =====================================================
 st.set_page_config(
-    page_title="OPSI A PRO — Institutional Trading System",
+    page_title="OPSI A PRO — Institutional Grade",
     layout="wide"
 )
+
 st.title("🚀 OPSI A PRO — SPOT & FUTURES (Institutional Grade)")
+
 
 # =====================================================
 # INIT EXCHANGE
 # =====================================================
 okx = get_okx()
 
+
 # =====================================================
-# AUTO MAINTENANCE (SAFE, NO ARGUMENT)
+# AUTO MAINTENANCE (SAFE)
 # =====================================================
 try:
-    auto_close_signals()
-except Exception as e:
-    st.warning(f"Auto maintenance error: {e}")
+    auto_close_signals()   # ⚠️ NO ARGUMENT
+except Exception:
+    pass
+
 
 # =====================================================
 # MODE & BALANCE
 # =====================================================
-MODE = st.radio("🧭 Trading Mode", ["SPOT", "FUTURES"], horizontal=True)
+MODE = st.radio(
+    "🧭 Trading Mode",
+    ["SPOT", "FUTURES"],
+    horizontal=True
+)
 
 BALANCE = st.number_input(
     "💰 Account Balance (USDT)",
@@ -63,6 +77,7 @@ BALANCE = st.number_input(
 )
 
 hour = wib_hour()
+
 
 # =====================================================
 # TIME WARNINGS
@@ -77,6 +92,7 @@ elif MODE == "FUTURES" and not is_safe_futures_time():
 elif MODE == "SPOT" and not is_safe_spot_time():
     st.warning("⚠️ Spot di luar jam ideal")
 
+
 # =====================================================
 # TABS
 # =====================================================
@@ -89,15 +105,23 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🔄 Δ Score (Rotation)"
 ])
 
+
 # =====================================================
 # TAB 1 — SCAN MARKET
 # =====================================================
 with tab1:
     if st.button("🔍 Scan Market"):
-        symbols = [
-            s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active") and s.endswith("/USDT")
-        ][:MAX_SCAN_SYMBOLS]
+
+        # =========================
+        # SYMBOL UNIVERSE
+        # =========================
+        if MODE == "FUTURES":
+            symbols = FUTURES_BIG_COINS
+        else:
+            symbols = [
+                s for s, m in okx.markets.items()
+                if m.get("spot") and m.get("active") and s.endswith("/USDT")
+            ][:MAX_SCAN_SYMBOLS]
 
         found = []
         progress = st.progress(0.0)
@@ -125,6 +149,7 @@ with tab1:
         else:
             st.warning("Tidak ada setup A+ ditemukan")
 
+
 # =====================================================
 # TAB 2 — SIGNAL HISTORY
 # =====================================================
@@ -143,6 +168,9 @@ with tab2:
 
     st.divider()
 
+    # =========================
+    # RESTORE CSV
+    # =========================
     st.subheader("📤 Restore Riwayat dari CSV")
 
     uploaded = st.file_uploader(
@@ -151,29 +179,27 @@ with tab2:
     )
 
     if uploaded:
-        try:
-            upload_df = pd.read_csv(uploaded)
-            st.dataframe(upload_df.head(), use_container_width=True)
+        upload_df = pd.read_csv(uploaded)
 
-            if st.button("♻️ Merge ke History"):
-                added = merge_signal_history(upload_df)
+        st.dataframe(upload_df.head(), use_container_width=True)
 
-                if added > 0:
-                    st.success(f"✅ {added} signal baru ditambahkan")
-                else:
-                    st.info("ℹ️ Tidak ada data baru")
+        if st.button("♻️ Merge ke History"):
+            added = merge_signal_history(upload_df)
 
-                st.experimental_rerun()
+            if added > 0:
+                st.success(f"✅ {added} signal baru ditambahkan")
+            else:
+                st.info("ℹ️ Tidak ada signal baru")
 
-        except Exception as e:
-            st.error(f"❌ Gagal membaca CSV: {e}")
+            st.experimental_rerun()
 
     st.download_button(
-        "⬇️ Download Backup",
+        "⬇️ Download Full History",
         df.to_csv(index=False),
         "signal_history_backup.csv",
         mime="text/csv"
     )
+
 
 # =====================================================
 # TAB 3 — MONTE CARLO
@@ -187,8 +213,15 @@ with tab3:
     if trade_results.empty:
         st.warning("Trade result belum cukup")
     else:
-        risk = st.slider("Risk / Trade (%)", 0.2, 3.0, 1.0) / 100
-        trades = st.slider("Trades / Simulation", 50, 500, 300)
+        risk = st.slider(
+            "Risk / Trade (%)",
+            0.2, 3.0, 1.0
+        ) / 100
+
+        trades = st.slider(
+            "Trades / Simulation",
+            50, 500, 300
+        )
 
         if st.button("🎲 Run Monte Carlo"):
             res = run_monte_carlo(
@@ -204,32 +237,46 @@ with tab3:
                 st.metric("Median Balance", f"${res['median']:,.0f}")
                 st.metric(
                     "Risk of Ruin",
-                    f"{res['risk_of_ruin']*100:.2f}%"
+                    f"{res['risk_of_ruin'] * 100:.2f}%"
                 )
 
                 fig = go.Figure()
                 for curve in res["curves"][:30]:
                     fig.add_trace(
-                        go.Scatter(y=curve, mode="lines", opacity=0.3)
+                        go.Scatter(
+                            y=curve,
+                            mode="lines",
+                            opacity=0.3
+                        )
                     )
+
                 st.plotly_chart(fig, use_container_width=True)
 
+
 # =====================================================
-# TAB 4 — SINGLE COIN ANALYSIS
+# TAB 4 — ANALISA SINGLE COIN
 # =====================================================
 with tab4:
     st.subheader("🎯 Analisa Single Coin")
 
-    symbols = [
-        s for s, m in okx.markets.items()
-        if m.get("spot") and m.get("active") and s.endswith("/USDT")
-    ]
+    symbols = (
+        FUTURES_BIG_COINS
+        if MODE == "FUTURES"
+        else [
+            s for s, m in okx.markets.items()
+            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+        ]
+    )
 
     col1, col2 = st.columns(2)
     with col1:
         symbol = st.selectbox("Pilih Coin", symbols)
     with col2:
-        mode_an = st.radio("Mode Analisa", ["SPOT", "FUTURES"], horizontal=True)
+        mode_an = st.radio(
+            "Mode Analisa",
+            ["SPOT", "FUTURES"],
+            horizontal=True
+        )
 
     bal_an = st.number_input(
         "Balance untuk Analisa (USDT)",
@@ -261,6 +308,7 @@ with tab4:
                 "Position Size": res["PositionSize"]
             })
 
+
 # =====================================================
 # TAB 5 — SCORE HEATMAP
 # =====================================================
@@ -269,29 +317,45 @@ with tab5:
 
     from heatmap import generate_score_heatmap
 
-    symbols = list(okx.markets.keys())[:60]
+    symbols = (
+        FUTURES_BIG_COINS
+        if MODE == "FUTURES"
+        else [
+            s for s, m in okx.markets.items()
+            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+        ][:60]
+    )
 
     if st.button("🎨 Generate Heatmap"):
         df = generate_score_heatmap(okx, symbols)
 
-        st.dataframe(df, use_container_width=True)
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
 
-        fig = px.imshow(
-            df.set_index("Symbol")[["Score"]],
-            aspect="auto",
-            title="Institutional Score Heatmap"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig = px.imshow(
+                df.set_index("Symbol")[["Score"]],
+                aspect="auto",
+                title="Institutional Score Heatmap"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
 
 # =====================================================
-# TAB 6 — DELTA SCORE ROTATION
+# TAB 6 — Δ SCORE ROTATION
 # =====================================================
 with tab6:
     st.subheader("🔄 Institutional Rotation (Δ Score)")
 
-    from heatmap_delta import take_score_snapshot, compute_score_delta
+    from heatmap_delta import (
+        take_score_snapshot,
+        compute_score_delta
+    )
 
-    symbols = list(okx.markets.keys())[:60]
+    symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
+        s for s, m in okx.markets.items()
+        if m.get("spot") and m.get("active") and s.endswith("/USDT")
+    ][:60]
 
     col1, col2 = st.columns(2)
 
@@ -302,16 +366,17 @@ with tab6:
 
     with col2:
         if st.button("🔥 Show Rotation"):
-            df = compute_score_delta()
+            df_delta = compute_score_delta()
 
-            if df is None or df.empty:
-                st.warning("Ambil snapshot minimal 2x")
+            if df_delta is None or df_delta.empty:
+                st.warning("Belum cukup snapshot")
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df_delta, use_container_width=True)
 
                 fig = px.imshow(
-                    df.set_index("Symbol")[["Delta"]],
+                    df_delta.set_index("Symbol")[["Delta"]],
                     aspect="auto",
-                    title="Δ Institutional Score"
+                    title="Δ Institutional Score (Rotation)"
                 )
+
                 st.plotly_chart(fig, use_container_width=True)
