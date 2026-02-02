@@ -7,6 +7,7 @@ import pandas as pd
 
 from config import SIGNAL_LOG_FILE
 from exchange import get_okx
+from regime import detect_market_regime
 
 
 # =====================================================
@@ -41,6 +42,33 @@ def load_signal_history():
             df[c] = ""
 
     df.to_csv(SIGNAL_LOG_FILE, index=False)
+    return df
+
+def update_current_regime(okx, df):
+    """
+    Update CurrentRegime & RegimeShift for OPEN signals only
+    """
+    if df.empty:
+        return df
+
+    for i, row in df.iterrows():
+        if row["Status"] != "OPEN":
+            continue
+
+        symbol = row["Symbol"]
+
+        try:
+            df4h = fetch_ohlcv(symbol, ENTRY_TF, LIMIT_4H)
+            df1d = fetch_ohlcv(symbol, DAILY_TF, LIMIT_1D)
+        except Exception:
+            continue
+
+        score_dummy = {}  # regime pakai struktur & trend
+        current_regime = detect_market_regime(df4h, df1d, score_dummy)
+
+        df.at[i, "CurrentRegime"] = current_regime
+        df.at[i, "RegimeShift"] = current_regime != row["Regime"]
+
     return df
 
 
