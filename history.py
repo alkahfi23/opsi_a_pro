@@ -114,6 +114,7 @@ def save_signal(sig):
 # =====================================================
 def auto_close_signals():
     df = load_signal_history()
+    df = update_current_regime(okx, df)
     okx = get_okx()
     changed = False
 
