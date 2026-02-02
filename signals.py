@@ -218,6 +218,12 @@ def check_signal(symbol, mode, balance):
     # =========================
     return {
         "SignalType": "TRADE_EXECUTION",
+    # 🔒 FREEZE (ENTRY SNAPSHOT)
+        "Regime": regime,
+    # 🔄 INITIAL CURRENT REGIME = ENTRY REGIME
+        "CurrentRegime": regime,
+    # ⚠️ BELUM ADA SHIFT SAAT ENTRY
+        "RegimeShift": False,
         "Time": now_wib(),
         "Symbol": symbol,
         "Phase": phase,
