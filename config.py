@@ -111,7 +111,7 @@ FUTURES_TRADE_FILE = "futures_trades.csv"
 # =====================================================
 # TELEGRAM CONFIG
 # =====================================================
-TELEGRAM_BOT_TOKEN = "PASTE_TOKEN_DI_SINI"
-TELEGRAM_CHAT_ID = "PASTE_CHAT_ID_DI_SINI"
+TELEGRAM_BOT_TOKEN = "7917140184:AAGDVPcLNea5h9X03-dzzaOuz0LOrtko-CM"
+TELEGRAM_CHAT_ID = "1455112133"
 
 TELEGRAM_ENABLE = True
