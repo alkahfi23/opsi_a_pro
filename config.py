@@ -106,3 +106,12 @@ FUTURES_BIG_COINS = [
 SIGNAL_LOG_FILE    = "signal_history.csv"
 TRADE_RESULT_FILE  = "trade_results.csv"
 FUTURES_TRADE_FILE = "futures_trades.csv"
+
+
+# =====================================================
+# TELEGRAM CONFIG
+# =====================================================
+TELEGRAM_BOT_TOKEN = "PASTE_TOKEN_DI_SINI"
+TELEGRAM_CHAT_ID = "PASTE_CHAT_ID_DI_SINI"
+
+TELEGRAM_ENABLE = True
