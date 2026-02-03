@@ -57,7 +57,7 @@ okx = get_okx()
 # AUTO MAINTENANCE (SAFE)
 # =====================================================
 try:
-    auto_close_signals()   # no argument
+    auto_close_signals()   # ⚠️ no argument
 except Exception:
     pass
 
@@ -129,8 +129,6 @@ with tab1:
         status = st.empty()
         total = len(symbols)
 
-        before_count = len(load_signal_history())
-
         for i, symbol in enumerate(symbols, 1):
             status.info(f"Scanning {symbol} ({i}/{total})")
 
@@ -141,25 +139,22 @@ with tab1:
 
             if sig and sig.get("SignalType") == "TRADE_EXECUTION":
                 save_signal(sig)
+                found.append(sig)
 
-                after_count = len(load_signal_history())
-
-                # ⛔ anti duplicate telegram
-                if after_count > before_count:
-                    found.append(sig)
-                    before_count = after_count
-
-                    try:
-                        msg = format_signal_message(sig)
-                        send_telegram_message(msg)
-                    except Exception:
-                        pass
+                # =========================
+                # TELEGRAM ALERT
+                # =========================
+                try:
+                    msg = format_signal_message(sig)
+                    send_telegram_message(msg)
+                except Exception:
+                    pass
 
             progress.progress(i / total)
             time.sleep(RATE_LIMIT_DELAY)
 
         if found:
-            st.success(f"🔥 Found {len(found)} A+ setups (Telegram sent)")
+            st.success(f"🔥 Found {len(found)} A+ setups")
             st.dataframe(pd.DataFrame(found), use_container_width=True)
         else:
             st.warning("Tidak ada setup A+ ditemukan")
@@ -174,13 +169,17 @@ with tab2:
     df = load_signal_history()
 
     st.metric("Total Signals", len(df))
-    st.metric("OPEN Signals", (df["Status"] == "OPEN").sum())
+    st.metric("OPEN Signals", (df.get("Status") == "OPEN").sum())
 
-    display_cols = [
+    # =========================
+    # SAFE DISPLAY COLUMNS
+    # =========================
+    preferred_cols = [
         "Time",
         "Symbol",
         "Phase",
-        "Regime",
+        "Regime",          # frozen regime (entry)
+        "CurrentRegime",   # current market regime
         "Score",
         "Entry",
         "SL",
@@ -192,6 +191,8 @@ with tab2:
         "Direction",
         "PositionSize"
     ]
+
+    display_cols = [c for c in preferred_cols if c in df.columns]
 
     st.dataframe(
         df[display_cols].sort_values("Time", ascending=False),
@@ -266,13 +267,11 @@ with tab3:
 
                 fig = go.Figure()
                 for curve in res["curves"][:30]:
-                    fig.add_trace(
-                        go.Scatter(
-                            y=curve,
-                            mode="lines",
-                            opacity=0.3
-                        )
-                    )
+                    fig.add_trace(go.Scatter(
+                        y=curve,
+                        mode="lines",
+                        opacity=0.3
+                    ))
 
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -294,7 +293,11 @@ with tab4:
     with col2:
         mode_an = st.radio("Mode Analisa", ["SPOT", "FUTURES"], horizontal=True)
 
-    bal_an = st.number_input("Balance untuk Analisa (USDT)", value=10000.0, step=100.0)
+    bal_an = st.number_input(
+        "Balance untuk Analisa (USDT)",
+        value=10000.0,
+        step=100.0
+    )
 
     if st.button("🔍 Analyze Coin"):
         res = analyze_single_coin(symbol, mode_an, bal_an)
@@ -314,8 +317,7 @@ with tab4:
             st.success("✅ SETUP VALID")
             st.json({
                 "Entry": res["Entry"],
-                "Execution SL": res["SL"],
-                "Invalidation SL": res.get("SL_Invalidation"),
+                "SL": res["SL"],
                 "TP1": res["TP1"],
                 "TP2": res["TP2"],
                 "Position Size": res["PositionSize"]
@@ -327,7 +329,6 @@ with tab4:
 # =====================================================
 with tab5:
     st.subheader("🔥 Institutional Score Heatmap")
-
     from heatmap import generate_score_heatmap
 
     symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
@@ -346,6 +347,7 @@ with tab5:
                 aspect="auto",
                 title="Institutional Score Heatmap"
             )
+
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -354,7 +356,6 @@ with tab5:
 # =====================================================
 with tab6:
     st.subheader("🔄 Institutional Rotation (Δ Score)")
-
     from heatmap_delta import take_score_snapshot, compute_score_delta
 
     symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
@@ -383,4 +384,5 @@ with tab6:
                     aspect="auto",
                     title="Δ Institutional Score (Rotation)"
                 )
+
                 st.plotly_chart(fig, use_container_width=True)
