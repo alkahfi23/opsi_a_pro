@@ -33,6 +33,8 @@ from history import (
 
 from montecarlo import run_monte_carlo
 from analyze_single_coin import analyze_single_coin
+from telegram_bot import send_telegram_message, format_signal_message
+
 
 
 # =====================================================
@@ -139,6 +141,12 @@ with tab1:
             if sig and sig.get("SignalType") == "TRADE_EXECUTION":
                 save_signal(sig)
                 found.append(sig)
+
+                 try:
+                    msg = format_signal_message(sig)
+                    send_telegram_message(msg)
+                except Exception:
+                    pass
 
             progress.progress(i / total)
             time.sleep(RATE_LIMIT_DELAY)
