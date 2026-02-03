@@ -22,3 +22,24 @@ def send_telegram_message(text: str):
         requests.post(url, json=payload, timeout=10)
     except Exception:
         pass
+        
+def format_signal_message(sig: dict) -> str:
+    return f"""
+🚨 *NEW SIGNAL — {sig['Mode']}*
+
+📌 *Symbol:* `{sig['Symbol']}`
+📈 *Direction:* {sig['Direction']}
+🧠 *Regime (Entry):* {sig['Regime']}
+⭐ *Score:* {sig['Score']}
+
+💰 *Entry:* `{sig['Entry']}`
+🛑 *Execution SL:* `{sig['SL']}`
+⚠️ *Invalidation SL:* `{sig.get('SL_Invalidation')}`
+
+🎯 *TP1:* `{sig['TP1']}`
+🎯 *TP2:* `{sig['TP2']}`
+
+📦 *Position Size:* `{sig['PositionSize']}`
+
+⏰ {sig['Time']}
+"""
