@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — MAIN APP
-# FINAL | STABLE | INSTITUTIONAL GRADE
+# FINAL | STABLE | INSTITUTIONAL GRADE | STREAMLIT SAFE
 # =====================================================
 
 import streamlit as st
@@ -28,7 +28,8 @@ from history import (
     load_signal_history,
     save_signal,
     auto_close_signals,
-    merge_signal_history
+    merge_signal_history,
+    monitor_regime_flip
 )
 
 from montecarlo import run_monte_carlo
@@ -37,7 +38,7 @@ from telegram_bot import send_telegram_message, format_signal_message
 
 
 # =====================================================
-# PAGE
+# PAGE CONFIG
 # =====================================================
 st.set_page_config(
     page_title="OPSI A PRO — Institutional Grade",
@@ -54,10 +55,11 @@ okx = get_okx()
 
 
 # =====================================================
-# AUTO MAINTENANCE (SAFE)
+# AUTO MAINTENANCE (SAFE FOR STREAMLIT CLOUD)
 # =====================================================
 try:
-    auto_close_signals()   # ⚠️ no argument
+    auto_close_signals()     # TP / SL check + telegram
+    monitor_regime_flip()    # regime flip alert
 except Exception:
     pass
 
@@ -138,18 +140,25 @@ with tab1:
                 continue
 
             if sig and sig.get("SignalType") == "TRADE_EXECUTION":
-                save_signal(sig)
-                found.append(sig)
 
-                # =========================
-                # TELEGRAM ALERT
-                # =========================
-                try:
-                    msg = format_signal_message(sig)
-                    send_telegram_message(msg)
-                    st.toast("📩 Telegram sent", icon="📨")
-                except Exception as e:
-                    st.error(f"Telegram failed: {e}")
+                # prevent duplicate telegram
+                before = len(load_signal_history())
+
+                save_signal(sig)
+                after = len(load_signal_history())
+
+                if after > before:
+                    found.append(sig)
+
+                    # =========================
+                    # TELEGRAM ALERT (ENTRY)
+                    # =========================
+                    try:
+                        msg = format_signal_message(sig)
+                        send_telegram_message(msg)
+                        st.toast("📩 Telegram sent", icon="📨")
+                    except Exception as e:
+                        st.warning(f"Telegram error: {e}")
 
             progress.progress(i / total)
             time.sleep(RATE_LIMIT_DELAY)
@@ -170,17 +179,15 @@ with tab2:
     df = load_signal_history()
 
     st.metric("Total Signals", len(df))
-    st.metric("OPEN Signals", (df.get("Status") == "OPEN").sum())
+    st.metric("OPEN Signals", (df["Status"] == "OPEN").sum())
 
-    # =========================
-    # SAFE DISPLAY COLUMNS
-    # =========================
     preferred_cols = [
         "Time",
         "Symbol",
         "Phase",
-        "Regime",          # frozen regime (entry)
-        "CurrentRegime",   # current market regime
+        "Regime",          # frozen
+        "CurrentRegime",   # live
+        "RegimeShift",
         "Score",
         "Entry",
         "SL",
@@ -193,10 +200,10 @@ with tab2:
         "PositionSize"
     ]
 
-    display_cols = [c for c in preferred_cols if c in df.columns]
+    show_cols = [c for c in preferred_cols if c in df.columns]
 
     st.dataframe(
-        df[display_cols].sort_values("Time", ascending=False),
+        df[show_cols].sort_values("Time", ascending=False),
         use_container_width=True
     )
 
@@ -257,9 +264,7 @@ with tab3:
                 trades
             )
 
-            if not res:
-                st.warning("Data belum cukup")
-            else:
+            if res:
                 st.metric("Median Balance", f"${res['median']:,.0f}")
                 st.metric(
                     "Risk of Ruin",
@@ -292,7 +297,11 @@ with tab4:
     with col1:
         symbol = st.selectbox("Pilih Coin", symbols)
     with col2:
-        mode_an = st.radio("Mode Analisa", ["SPOT", "FUTURES"], horizontal=True)
+        mode_an = st.radio(
+            "Mode Analisa",
+            ["SPOT", "FUTURES"],
+            horizontal=True
+        )
 
     bal_an = st.number_input(
         "Balance untuk Analisa (USDT)",
@@ -338,17 +347,16 @@ with tab5:
     ][:60]
 
     if st.button("🎨 Generate Heatmap"):
-        df = generate_score_heatmap(okx, symbols)
+        df_hm = generate_score_heatmap(okx, symbols)
 
-        if not df.empty:
-            st.dataframe(df, use_container_width=True)
+        if not df_hm.empty:
+            st.dataframe(df_hm, use_container_width=True)
 
             fig = px.imshow(
-                df.set_index("Symbol")[["Score"]],
+                df_hm.set_index("Symbol")[["Score"]],
                 aspect="auto",
                 title="Institutional Score Heatmap"
             )
-
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -385,5 +393,4 @@ with tab6:
                     aspect="auto",
                     title="Δ Institutional Score (Rotation)"
                 )
-
                 st.plotly_chart(fig, use_container_width=True)
