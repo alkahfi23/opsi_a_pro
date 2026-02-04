@@ -125,6 +125,12 @@ SIGNAL_COOLDOWN_MINUTES = 240   # 4 jam (recommended)
 # berlaku untuk mode yang sama (SPOT / FUTURES)
 COOLDOWN_BY_MODE = True
 
+# =====================================================
+# TELEGRAM COOLDOWN
+# =====================================================
+TELEGRAM_COOLDOWN_HOURS = 2   # bisa 1 – 4 jam
+
+
 
 COOLDOWN_FILE = "signal_cooldown.json"
 
