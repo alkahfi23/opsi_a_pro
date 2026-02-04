@@ -134,7 +134,7 @@ if __name__ == "__main__":
             # =========================
             auto_close_signals()
             log("🔧 Auto maintenance done")
-
+            send_telegram_message("🧪 OPSI A PRO test message — deploy OK")
             # =========================
             # MARKET SCANS
             # =========================
