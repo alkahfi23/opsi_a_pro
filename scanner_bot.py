@@ -1,28 +1,33 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | CLEAN LOG
+# CRON-LIKE | RENDER SAFE | CLEAN LOG | ANTI DUPLICATE
 # =====================================================
 
 # =========================
-# ENV & WARNING SUPPRESS
+# ENV (NO STREAMLIT HERE)
 # =========================
 import os
-import warnings
-
-os.environ["STREAMLIT_SUPPRESS_CONFIG_WARNINGS"] = "1"
-warnings.filterwarnings("ignore", module="streamlit")
-
-# =========================
-# CORE IMPORT
-# =========================
 import time
 from datetime import datetime
 
+# =========================
+# CORE IMPORT (NO st)
+# =========================
 from exchange import get_okx
 from signals import check_signal
-from history import save_signal, auto_close_signals
-from telegram_bot import send_telegram_message, format_signal_message
-from scheduler import is_optimal_spot, is_optimal_futures
+from history import (
+    save_signal,
+    auto_close_signals,
+    is_symbol_in_cooldown      # ✅ ANTI SPAM
+)
+from telegram_bot import (
+    send_telegram_message,
+    format_signal_message
+)
+from scheduler import (
+    is_optimal_spot,
+    is_optimal_futures
+)
 from config import (
     FUTURES_BIG_COINS,
     MAX_SCAN_SYMBOLS,
@@ -33,7 +38,8 @@ from config import (
 # CONFIG
 # =========================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi only (no execution)
+BALANCE_DUMMY = 10_000     # simulasi only
+
 
 # =========================
 # SIMPLE LOGGER
@@ -68,7 +74,8 @@ def scan_market(mode: str):
         if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+            if m.get("spot") and m.get("active")
+            and s.endswith("/USDT")
         ][:MAX_SCAN_SYMBOLS]
     )
 
@@ -78,6 +85,13 @@ def scan_market(mode: str):
     # MAIN LOOP
     # =========================
     for symbol in symbols:
+
+        # =========================
+        # COOLDOWN CHECK
+        # =========================
+        if is_symbol_in_cooldown(symbol, mode):
+            continue
+
         try:
             sig = check_signal(symbol, mode, BALANCE_DUMMY)
         except Exception as e:
@@ -85,8 +99,14 @@ def scan_market(mode: str):
             continue
 
         if sig and sig.get("SignalType") == "TRADE_EXECUTION":
+
             save_signal(sig)
-            log(f"✅ SIGNAL {symbol} {sig['Direction']} | Score {sig['Score']}")
+            log(
+                f"✅ SIGNAL {symbol} "
+                f"{sig['Direction']} | "
+                f"Score {sig['Score']} | "
+                f"{sig['Regime']}"
+            )
 
             # =========================
             # TELEGRAM ALERT
@@ -112,7 +132,7 @@ if __name__ == "__main__":
             # =========================
             # AUTO MAINTENANCE
             # =========================
-            auto_close_signals()   # TP / SL / alerts
+            auto_close_signals()
             log("🔧 Auto maintenance done")
 
             # =========================
