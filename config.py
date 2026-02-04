@@ -107,4 +107,15 @@ SIGNAL_LOG_FILE    = "signal_history.csv"
 TRADE_RESULT_FILE  = "trade_results.csv"
 FUTURES_TRADE_FILE = "futures_trades.csv"
 
+# =====================================================
+# SIGNAL COOLDOWN
+# =====================================================
+
+# cooldown per symbol (minutes)
+SPOT_SIGNAL_COOLDOWN_MIN = 240     # 4 jam
+FUTURES_SIGNAL_COOLDOWN_MIN = 240  # 4 jam
+
+COOLDOWN_FILE = "signal_cooldown.json"
+
+
 
