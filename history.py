@@ -5,7 +5,7 @@
 
 import os
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from config import (
     SIGNAL_LOG_FILE,
@@ -23,12 +23,13 @@ from regime import detect_market_regime
 # FILE STRUCTURE
 # =====================================================
 COLUMNS = [
-    "Time",
+    "TimeUTC",             # ⏱️ internal UTC time
+    "TimeWIB",             # 🕒 display only
     "Symbol",
     "Phase",
-    "Regime",              # 🔒 entry regime (freeze)
-    "CurrentRegime",       # 🔄 live regime
-    "RegimeShift",         # 🚨 flag
+    "Regime",              # 🔒 entry regime
+    "CurrentRegime",
+    "RegimeShift",
     "Score",
     "Entry",
     "SL",
@@ -66,7 +67,7 @@ def load_signal_history():
 
 
 # =====================================================
-# SYMBOL COOLDOWN CHECK (ANTI DUPLICATE)
+# SYMBOL COOLDOWN CHECK
 # =====================================================
 def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
     df = load_signal_history()
@@ -81,17 +82,14 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
     if df.empty:
         return False
 
-    last = df.sort_values("Time", ascending=False).iloc[0]
+    last = df.sort_values("TimeUTC", ascending=False).iloc[0]
 
-    # ⛔ masih OPEN → block langsung
+    # ⛔ masih OPEN → block
     if last["Status"] == "OPEN":
         return True
 
-    # ⏳ cooldown time check
     try:
-        last_time = datetime.strptime(
-            last["Time"], "%Y-%m-%d %H:%M WIB"
-        )
+        last_time = datetime.fromisoformat(last["TimeUTC"])
     except Exception:
         return False
 
@@ -99,46 +97,49 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
         minutes=SIGNAL_COOLDOWN_MINUTES
     )
 
-    return datetime.now() < cooldown_until
+    return datetime.now(timezone.utc) < cooldown_until
 
 
 # =====================================================
-# SAVE SIGNAL (ENTRY SNAPSHOT)
+# SAVE SIGNAL (ENTRY)
 # =====================================================
 def save_signal(signal: dict):
     _init_file()
     df = load_signal_history()
 
+    now_utc = datetime.now(timezone.utc)
+    now_wib = now_utc.astimezone(
+        timezone(timedelta(hours=7))
+    )
+
     row = {
-        "Time": signal.get("Time"),
-        "Symbol": signal.get("Symbol"),
-        "Phase": signal.get("Phase"),
-        "Regime": signal.get("Regime"),
-        "CurrentRegime": signal.get("Regime"),
+        "TimeUTC": now_utc.isoformat(),
+        "TimeWIB": now_wib.strftime("%Y-%m-%d %H:%M WIB"),
+        "Symbol": signal["Symbol"],
+        "Phase": signal["Phase"],
+        "Regime": signal["Regime"],
+        "CurrentRegime": signal["Regime"],
         "RegimeShift": False,
-        "Score": signal.get("Score"),
-        "Entry": signal.get("Entry"),
-        "SL": signal.get("SL"),
-        "SL_Invalidation": signal.get("SL_Invalidation"),
-        "TP1": signal.get("TP1"),
-        "TP2": signal.get("TP2"),
+        "Score": signal["Score"],
+        "Entry": signal["Entry"],
+        "SL": signal["SL"],
+        "SL_Invalidation": signal["SL_Invalidation"],
+        "TP1": signal["TP1"],
+        "TP2": signal["TP2"],
         "Status": "OPEN",
-        "Mode": signal.get("Mode"),
-        "Direction": signal.get("Direction"),
+        "Mode": signal["Mode"],
+        "Direction": signal["Direction"],
         "PositionSize": signal.get("PositionSize", 0),
         "AutoLabel": "WAIT",
         "Alerted": ""
     }
 
-    df = pd.concat(
-        [df, pd.DataFrame([row])],
-        ignore_index=True
-    )
+    df.loc[len(df)] = row
     df.to_csv(SIGNAL_LOG_FILE, index=False)
 
 
 # =====================================================
-# AUTO CLOSE (TP / SL) + TELEGRAM
+# AUTO CLOSE (TP / SL)
 # =====================================================
 def auto_close_signals():
     if not os.path.exists(SIGNAL_LOG_FILE):
@@ -197,7 +198,7 @@ def auto_close_signals():
 
 
 # =====================================================
-# REGIME FLIP MONITOR (OPEN ONLY)
+# REGIME FLIP MONITOR
 # =====================================================
 def monitor_regime_flip():
     if not os.path.exists(SIGNAL_LOG_FILE):
@@ -237,12 +238,11 @@ def monitor_regime_flip():
                 changed = True
 
                 send_telegram_message(
-                    f"🚨 REGIME FLIP ALERT\n\n"
-                    f"Symbol : {symbol}\n"
+                    f"🚨 *REGIME FLIP ALERT*\n\n"
+                    f"Symbol : `{symbol}`\n"
                     f"From   : {row['Regime']}\n"
                     f"To     : {current_regime}\n\n"
-                    f"⚠️ Position still OPEN\n"
-                    f"Consider risk reduction"
+                    f"⚠️ Position still OPEN"
                 )
 
         except Exception:
@@ -250,32 +250,3 @@ def monitor_regime_flip():
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
-
-
-# =====================================================
-# MERGE HISTORY (CSV RESTORE)
-# =====================================================
-def merge_signal_history(upload_df: pd.DataFrame) -> int:
-    _init_file()
-    df = load_signal_history()
-
-    key_cols = ["Time", "Symbol", "Mode"]
-    existing = set(tuple(row) for row in df[key_cols].values)
-
-    rows = []
-    added = 0
-
-    for _, row in upload_df.iterrows():
-        key = tuple(row.get(col) for col in key_cols)
-        if key not in existing:
-            rows.append(row)
-            added += 1
-
-    if rows:
-        df = pd.concat(
-            [df, pd.DataFrame(rows)],
-            ignore_index=True
-        )
-        df.to_csv(SIGNAL_LOG_FILE, index=False)
-
-    return added
