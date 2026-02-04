@@ -30,6 +30,9 @@ from regime import detect_market_regime, detect_regime_shift
 from risk import calculate_futures_position
 from utils import now_wib, is_danger_time
 
+# 🔒 COOLDOWN ENGINE
+from cooldown import is_on_cooldown, set_cooldown
+
 
 # =====================================================
 # LTF FUTURES ENTRY
@@ -72,6 +75,12 @@ def futures_ltf_sl(df_ltf, direction, lookback=5):
 # MAIN SIGNAL
 # =====================================================
 def check_signal(symbol, mode, balance):
+
+    # =========================
+    # ⛔ ANTI DUPLICATE (COOLDOWN)
+    # =========================
+    if is_on_cooldown(symbol, mode):
+        return None
 
     # =========================
     # FUTURES KILL SWITCH
@@ -213,6 +222,11 @@ def check_signal(symbol, mode, balance):
             return None
 
     # =========================
+    # 🔒 SET COOLDOWN (ONLY IF VALID)
+    # =========================
+    set_cooldown(symbol, mode)
+
+    # =========================
     # FINAL SIGNAL (FREEZE SNAPSHOT)
     # =========================
     return {
@@ -220,10 +234,10 @@ def check_signal(symbol, mode, balance):
         "Time": now_wib(),
         "Symbol": symbol,
         "Phase": phase,
-        "Regime": regime,              # 🔒 FREEZE
+        "Regime": regime,
         "Score": score,
         "Entry": round(entry, 6),
-        "SL": round(sl_exec, 6),       # EXECUTION SL
+        "SL": round(sl_exec, 6),
         "SL_Invalidation": round(sl_htf, 6),
         "TP1": round(tp1, 6),
         "TP2": round(tp2, 6),
