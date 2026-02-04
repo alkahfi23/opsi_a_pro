@@ -1,45 +1,41 @@
-# =====================================================
-# OPSI A PRO — TELEGRAM NOTIFIER
-# =====================================================
-
 import requests
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLE
+import streamlit as st
+
+BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
+CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+
+TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 
 def send_telegram_message(text: str):
-    if not TELEGRAM_ENABLE:
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": CHAT_ID,
         "text": text,
-        "parse_mode": "Markdown"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
 
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception:
-        pass
-        
+    r = requests.post(TELEGRAM_URL, json=payload, timeout=10)
+
+    # ⛔ WAJIB raise kalau gagal
+    if r.status_code != 200:
+        raise RuntimeError(f"Telegram error: {r.text}")
+
+
 def format_signal_message(sig: dict) -> str:
     return f"""
-🚨 *NEW SIGNAL — {sig['Mode']}*
+<b>🚨 OPSI A PRO SIGNAL</b>
 
-📌 *Symbol:* `{sig['Symbol']}`
-📈 *Direction:* {sig['Direction']}
-🧠 *Regime (Entry):* {sig['Regime']}
-⭐ *Score:* {sig['Score']}
+<b>Symbol:</b> {sig['Symbol']}
+<b>Mode:</b> {sig['Mode']}
+<b>Direction:</b> {sig['Direction']}
+<b>Score:</b> {sig['Score']}
+<b>Regime:</b> {sig['Regime']}
 
-💰 *Entry:* `{sig['Entry']}`
-🛑 *Execution SL:* `{sig['SL']}`
-⚠️ *Invalidation SL:* `{sig.get('SL_Invalidation')}`
+<b>Entry:</b> {sig['Entry']}
+<b>SL:</b> {sig['SL']}
+<b>TP1:</b> {sig['TP1']}
+<b>TP2:</b> {sig['TP2']}
 
-🎯 *TP1:* `{sig['TP1']}`
-🎯 *TP2:* `{sig['TP2']}`
-
-📦 *Position Size:* `{sig['PositionSize']}`
-
-⏰ {sig['Time']}
+<b>Time:</b> {sig['Time']}
 """
