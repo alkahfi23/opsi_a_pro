@@ -1,112 +1,169 @@
 # =====================================================
-# OPSI A PRO — TELEGRAM BOT CORE
-# FINAL | RENDER SAFE | NO STREAMLIT | ANTI SILENT FAIL
+# OPSI A PRO — AUTO SCANNER BOT
+# CRON-LIKE | RENDER SAFE | CLEAN LOG | TELEGRAM READY
 # =====================================================
 
+# =========================
+# ENV & WARNING SUPPRESS
+# =========================
 import os
-import requests
-from datetime import datetime
+import warnings
+
+os.environ["STREAMLIT_SUPPRESS_CONFIG_WARNINGS"] = "1"
+warnings.filterwarnings("ignore")
+
+# =========================
+# CORE IMPORT
+# =========================
+import time
+from datetime import datetime, timezone
+
+from exchange import get_okx
+from signals import check_signal
+from history import (
+    save_signal,
+    auto_close_signals,
+    load_signal_history
+)
+from telegram_bot import (
+    send_telegram_message,
+    format_signal_message
+)
+from scheduler import (
+    is_optimal_spot,
+    is_optimal_futures
+)
+from config import (
+    FUTURES_BIG_COINS,
+    MAX_SCAN_SYMBOLS,
+    RATE_LIMIT_DELAY
+)
+
+# =========================
+# CONFIG
+# =========================
+SCAN_INTERVAL = 300        # 5 menit
+BALANCE_DUMMY = 10_000     # simulasi only (no execution)
+
+# =========================
+# LOGGER (UTC SAFE)
+# =========================
+def log(msg: str):
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    print(f"[{now}] {msg}", flush=True)
+
 
 # =====================================================
-# ENV (RENDER)
+# DUPLICATE CHECK (ANTI SPAM)
 # =====================================================
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
-
-if not BOT_TOKEN or not CHAT_ID:
-    raise RuntimeError(
-        "❌ TELEGRAM ENV NOT SET. "
-        "Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Render."
-    )
-
-TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-
-# =====================================================
-# CORE SENDER
-# =====================================================
-def send_telegram_message(text: str):
+def is_new_signal(symbol: str, mode: str) -> bool:
     """
-    Safe Telegram sender with response validation
+    Prevent duplicate signal spam per symbol & mode
     """
+    df = load_signal_history()
+    if df.empty:
+        return True
 
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",   # 🔥 HTML = SAFE (no markdown crash)
-        "disable_web_page_preview": True
-    }
+    recent = df[
+        (df["Symbol"] == symbol) &
+        (df["Mode"] == mode) &
+        (df["Status"] == "OPEN")
+    ]
 
-    try:
-        r = requests.post(
-            TELEGRAM_URL,
-            json=payload,
-            timeout=10
-        )
-    except Exception as e:
-        raise RuntimeError(f"Telegram request failed: {e}")
+    return recent.empty
+
+
+# =====================================================
+# SCAN FUNCTION
+# =====================================================
+def scan_market(mode: str):
+    okx = get_okx()
 
     # =========================
-    # VALIDATE RESPONSE
+    # TIME GUARD
     # =========================
-    if r.status_code != 200:
-        raise RuntimeError(
-            f"Telegram API error {r.status_code}: {r.text}"
-        )
+    if mode == "FUTURES" and not is_optimal_futures():
+        log("⏳ FUTURES outside optimal hours — skip")
+        return
 
-    data = r.json()
-    if not data.get("ok"):
-        raise RuntimeError(
-            f"Telegram rejected message: {data}"
-        )
+    if mode == "SPOT" and not is_optimal_spot():
+        log("⏳ SPOT outside optimal hours — skip")
+        return
 
-
-# =====================================================
-# SIGNAL MESSAGE (ENTRY)
-# =====================================================
-def format_signal_message(sig: dict) -> str:
-    return (
-        f"🚀 <b>OPSI A PRO — NEW SIGNAL</b>\n\n"
-        f"<b>Symbol:</b> {sig['Symbol']}\n"
-        f"<b>Mode:</b> {sig['Mode']}\n"
-        f"<b>Side:</b> {sig['Direction']}\n"
-        f"<b>Score:</b> {sig['Score']}\n"
-        f"<b>Regime:</b> {sig['Regime']}\n\n"
-        f"<b>Entry:</b> {sig['Entry']}\n"
-        f"<b>SL:</b> {sig['SL']}\n"
-        f"<b>TP1:</b> {sig['TP1']}\n"
-        f"<b>TP2:</b> {sig['TP2']}\n\n"
-        f"⏰ <i>{sig['Time']}</i>"
+    # =========================
+    # SYMBOL UNIVERSE
+    # =========================
+    symbols = (
+        FUTURES_BIG_COINS
+        if mode == "FUTURES"
+        else [
+            s for s, m in okx.markets.items()
+            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+        ][:MAX_SCAN_SYMBOLS]
     )
 
+    log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
+
+    # =========================
+    # MAIN LOOP
+    # =========================
+    for symbol in symbols:
+        try:
+            sig = check_signal(symbol, mode, BALANCE_DUMMY)
+        except Exception as e:
+            log(f"⚠️ Signal error {symbol}: {e}")
+            continue
+
+        if sig and sig.get("SignalType") == "TRADE_EXECUTION":
+
+            # =========================
+            # ANTI DUPLICATE
+            # =========================
+            if not is_new_signal(symbol, mode):
+                continue
+
+            save_signal(sig)
+            log(
+                f"✅ SIGNAL {symbol} {sig['Direction']} | "
+                f"Score {sig['Score']} | {sig['Regime']}"
+            )
+
+            # =========================
+            # TELEGRAM ALERT
+            # =========================
+            try:
+                msg = format_signal_message(sig)
+                send_telegram_message(msg)
+                log("📩 Telegram sent")
+            except Exception as e:
+                log(f"❌ Telegram error: {e}")
+
+        time.sleep(RATE_LIMIT_DELAY)
+
 
 # =====================================================
-# TRADE UPDATE (TP / SL)
+# MAIN LOOP (CRON-LIKE)
 # =====================================================
-def format_trade_update(row: dict) -> str:
-    return (
-        f"⚠️ <b>OPSI A PRO — TRADE UPDATE</b>\n\n"
-        f"<b>Symbol:</b> {row['Symbol']}\n"
-        f"<b>Mode:</b> {row['Mode']}\n"
-        f"<b>Direction:</b> {row['Direction']}\n"
-        f"<b>Status:</b> {row['Status']}\n\n"
-        f"<b>Entry:</b> {row['Entry']}\n"
-        f"<b>SL:</b> {row['SL']}\n"
-        f"<b>TP1:</b> {row['TP1']}\n"
-        f"<b>TP2:</b> {row['TP2']}\n\n"
-        f"⏰ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
-    )
+if __name__ == "__main__":
+    log("🚀 OPSI A PRO Scanner started")
 
+    while True:
+        try:
+            # =========================
+            # AUTO MAINTENANCE
+            # =========================
+            auto_close_signals()
+            log("🔧 Auto maintenance done")
 
-# =====================================================
-# REGIME FLIP ALERT
-# =====================================================
-def format_regime_flip(symbol, old_regime, new_regime) -> str:
-    return (
-        f"🚨 <b>REGIME FLIP ALERT</b>\n\n"
-        f"<b>Symbol:</b> {symbol}\n"
-        f"<b>From:</b> {old_regime}\n"
-        f"<b>To:</b> {new_regime}\n\n"
-        f"⚠️ Position still OPEN\n"
-        f"Consider reducing risk"
-    )
+            # =========================
+            # SCANS
+            # =========================
+            scan_market("FUTURES")
+            scan_market("SPOT")
+
+            log("😴 Cycle complete — waiting next run")
+
+        except Exception as e:
+            log(f"🔥 Scanner crash prevented: {e}")
+
+        time.sleep(SCAN_INTERVAL)
