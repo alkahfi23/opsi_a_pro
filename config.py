@@ -115,6 +115,17 @@ FUTURES_TRADE_FILE = "futures_trades.csv"
 SPOT_SIGNAL_COOLDOWN_MIN = 240     # 4 jam
 FUTURES_SIGNAL_COOLDOWN_MIN = 240  # 4 jam
 
+# =====================================================
+# ANTI SPAM / COOLDOWN
+# =====================================================
+
+# cooldown per symbol (menit)
+SIGNAL_COOLDOWN_MINUTES = 240   # 4 jam (recommended)
+
+# berlaku untuk mode yang sama (SPOT / FUTURES)
+COOLDOWN_BY_MODE = True
+
+
 COOLDOWN_FILE = "signal_cooldown.json"
 
 
