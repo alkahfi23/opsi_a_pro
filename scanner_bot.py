@@ -1,45 +1,39 @@
 # =====================================================
-# OPSI A PRO — AUTO SCANNER BOT (RENDER)
-# 24/7 | OPTIMAL HOURS | TELEGRAM ONLY
+# OPSI A PRO — AUTO SCANNER BOT
+# CRON-LIKE | RENDER SAFE
 # =====================================================
 
 import time
-from datetime import datetime
-
 from exchange import get_okx
-from config import (
-    RATE_LIMIT_DELAY,
-    MAX_SCAN_SYMBOLS,
-    FUTURES_BIG_COINS
-)
 from signals import check_signal
-from history import (
-    load_signal_history,
-    save_signal,
-    auto_close_signals,
-    monitor_regime_flip
-)
+from history import save_signal, auto_close_signals
 from telegram_bot import send_telegram_message, format_signal_message
-from utils import is_safe_spot_time, is_safe_futures_time
+from scheduler import is_optimal_spot, is_optimal_futures
+from config import (
+    FUTURES_BIG_COINS,
+    MAX_SCAN_SYMBOLS,
+    RATE_LIMIT_DELAY
+)
+
+# =========================
+# CONFIG
+# =========================
+SCAN_INTERVAL = 300  # 5 menit
+BALANCE_DUMMY = 10_000  # tidak eksekusi real
 
 
-SCAN_INTERVAL = 60 * 5   # check setiap 5 menit
-MODE = "FUTURES"         # atau SPOT
-BALANCE = 10000
-
-
-def run_scan():
+def scan_market(mode: str):
     okx = get_okx()
 
-    if MODE == "FUTURES" and not is_safe_futures_time():
+    if mode == "FUTURES" and not is_optimal_futures():
         return
 
-    if MODE == "SPOT" and not is_safe_spot_time():
+    if mode == "SPOT" and not is_optimal_spot():
         return
 
     symbols = (
         FUTURES_BIG_COINS
-        if MODE == "FUTURES"
+        if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
             if m.get("spot") and m.get("active") and s.endswith("/USDT")
@@ -48,30 +42,31 @@ def run_scan():
 
     for symbol in symbols:
         try:
-            sig = check_signal(symbol, MODE, BALANCE)
+            sig = check_signal(symbol, mode, BALANCE_DUMMY)
         except Exception:
             continue
 
-        if sig and sig.get("SignalType") == "TRADE_EXECUTION":
-            before = len(load_signal_history())
+        if sig and sig["SignalType"] == "TRADE_EXECUTION":
             save_signal(sig)
-            after = len(load_signal_history())
 
-            if after > before:
+            try:
                 msg = format_signal_message(sig)
                 send_telegram_message(msg)
+            except Exception:
+                pass
 
         time.sleep(RATE_LIMIT_DELAY)
 
 
+# =========================
+# MAIN LOOP (CRON-LIKE)
+# =========================
 if __name__ == "__main__":
-    print("🚀 OPSI AUTO SCANNER STARTED")
-
     while True:
         try:
-            auto_close_signals()      # TP / SL
-            monitor_regime_flip()     # regime flip
-            run_scan()
+            auto_close_signals()      # TP / SL alert
+            scan_market("FUTURES")    # auto futures
+            scan_market("SPOT")       # auto spot
         except Exception as e:
             print("Scanner error:", e)
 
