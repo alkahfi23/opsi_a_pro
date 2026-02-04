@@ -1,10 +1,23 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE
+# CRON-LIKE | RENDER SAFE | CLEAN LOG
 # =====================================================
 
+# =========================
+# ENV & WARNING SUPPRESS
+# =========================
+import os
 import warnings
+
+os.environ["STREAMLIT_SUPPRESS_CONFIG_WARNINGS"] = "1"
+warnings.filterwarnings("ignore", module="streamlit")
+
+# =========================
+# CORE IMPORT
+# =========================
 import time
+from datetime import datetime
+
 from exchange import get_okx
 from signals import check_signal
 from history import save_signal, auto_close_signals
@@ -19,23 +32,37 @@ from config import (
 # =========================
 # CONFIG
 # =========================
+SCAN_INTERVAL = 300        # 5 menit
+BALANCE_DUMMY = 10_000     # simulasi only (no execution)
 
-os.environ["STREAMLIT_SUPPRESS_CONFIG_WARNINGS"] = "1"
-warnings.filterwarnings("ignore", module="streamlit")
+# =========================
+# SIMPLE LOGGER
+# =========================
+def log(msg: str):
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now}] {msg}", flush=True)
 
-SCAN_INTERVAL = 300  # 5 menit
-BALANCE_DUMMY = 10_000  # tidak eksekusi real
 
-
+# =====================================================
+# SCAN FUNCTION
+# =====================================================
 def scan_market(mode: str):
     okx = get_okx()
 
+    # =========================
+    # TIME GUARD
+    # =========================
     if mode == "FUTURES" and not is_optimal_futures():
+        log("⏳ FUTURES outside optimal hours — skip")
         return
 
     if mode == "SPOT" and not is_optimal_spot():
+        log("⏳ SPOT outside optimal hours — skip")
         return
 
+    # =========================
+    # SYMBOL UNIVERSE
+    # =========================
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
@@ -45,34 +72,58 @@ def scan_market(mode: str):
         ][:MAX_SCAN_SYMBOLS]
     )
 
+    log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
+
+    # =========================
+    # MAIN LOOP
+    # =========================
     for symbol in symbols:
         try:
             sig = check_signal(symbol, mode, BALANCE_DUMMY)
-        except Exception:
+        except Exception as e:
+            log(f"⚠️ Signal error {symbol}: {e}")
             continue
 
-        if sig and sig["SignalType"] == "TRADE_EXECUTION":
+        if sig and sig.get("SignalType") == "TRADE_EXECUTION":
             save_signal(sig)
+            log(f"✅ SIGNAL {symbol} {sig['Direction']} | Score {sig['Score']}")
 
+            # =========================
+            # TELEGRAM ALERT
+            # =========================
             try:
                 msg = format_signal_message(sig)
                 send_telegram_message(msg)
-            except Exception:
-                pass
+                log("📩 Telegram sent")
+            except Exception as e:
+                log(f"❌ Telegram error: {e}")
 
         time.sleep(RATE_LIMIT_DELAY)
 
 
-# =========================
+# =====================================================
 # MAIN LOOP (CRON-LIKE)
-# =========================
+# =====================================================
 if __name__ == "__main__":
+    log("🚀 OPSI A PRO Scanner started")
+
     while True:
         try:
-            auto_close_signals()      # TP / SL alert
-            scan_market("FUTURES")    # auto futures
-            scan_market("SPOT")       # auto spot
+            # =========================
+            # AUTO MAINTENANCE
+            # =========================
+            auto_close_signals()   # TP / SL / alerts
+            log("🔧 Auto maintenance done")
+
+            # =========================
+            # SCANS
+            # =========================
+            scan_market("FUTURES")
+            scan_market("SPOT")
+
+            log("😴 Cycle complete — waiting next run")
+
         except Exception as e:
-            print("Scanner error:", e)
+            log(f"🔥 Scanner crash prevented: {e}")
 
         time.sleep(SCAN_INTERVAL)
