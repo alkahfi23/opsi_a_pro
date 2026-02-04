@@ -1,17 +1,18 @@
 # =====================================================
 # OPSI A PRO — SIGNAL HISTORY ENGINE
-# FINAL | STABLE | REGIME FREEZE
+# FINAL | STABLE | REGIME FREEZE + TELEGRAM ALERT
 # =====================================================
 
 import os
 import pandas as pd
-from datetime import datetime
 
 from config import SIGNAL_LOG_FILE
+from exchange import get_okx
+from telegram_bot import send_telegram_message, format_trade_update
 
 
 # =====================================================
-# INIT FILE
+# FILE STRUCTURE
 # =====================================================
 COLUMNS = [
     "Time",
@@ -28,14 +29,17 @@ COLUMNS = [
     "Mode",
     "Direction",
     "PositionSize",
-    "AutoLabel"
+    "AutoLabel",
+    "Alerted"              # ⛔ anti spam telegram
 ]
 
 
+# =====================================================
+# INIT FILE
+# =====================================================
 def _init_file():
     if not os.path.exists(SIGNAL_LOG_FILE):
-        df = pd.DataFrame(columns=COLUMNS)
-        df.to_csv(SIGNAL_LOG_FILE, index=False)
+        pd.DataFrame(columns=COLUMNS).to_csv(SIGNAL_LOG_FILE, index=False)
 
 
 # =====================================================
@@ -44,21 +48,15 @@ def _init_file():
 def load_signal_history():
     _init_file()
     try:
-        df = pd.read_csv(SIGNAL_LOG_FILE)
+        return pd.read_csv(SIGNAL_LOG_FILE)
     except Exception:
-        df = pd.DataFrame(columns=COLUMNS)
-
-    return df
+        return pd.DataFrame(columns=COLUMNS)
 
 
 # =====================================================
-# SAVE SIGNAL (FREEZE REGIME)
+# SAVE SIGNAL (ENTRY)
 # =====================================================
 def save_signal(signal: dict):
-    """
-    Save signal with frozen regime & structure SL
-    """
-
     _init_file()
     df = load_signal_history()
 
@@ -77,7 +75,8 @@ def save_signal(signal: dict):
         "Mode": signal.get("Mode"),
         "Direction": signal.get("Direction"),
         "PositionSize": signal.get("PositionSize", 0),
-        "AutoLabel": "WAIT"
+        "AutoLabel": "WAIT",
+        "Alerted": ""
     }
 
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
@@ -85,63 +84,65 @@ def save_signal(signal: dict):
 
 
 # =====================================================
-# AUTO CLOSE SIGNALS
+# AUTO CLOSE SIGNALS (REAL PRICE + TELEGRAM)
 # =====================================================
 def auto_close_signals():
-    """
-    Auto update status:
-    - TP1 HIT
-    - TP2 HIT
-    - SL HIT
-
-    ⚠️ Uses candle CLOSE logic
-    """
-
     if not os.path.exists(SIGNAL_LOG_FILE):
         return
 
     df = pd.read_csv(SIGNAL_LOG_FILE)
-
     if df.empty:
         return
 
+    okx = get_okx()
     changed = False
 
     for i, row in df.iterrows():
-        if row["Status"] != "OPEN":
+        if row["Status"] not in ["OPEN", "TP1 HIT"]:
             continue
 
-        entry = row["Entry"]
-        sl = row["SL"]
-        tp1 = row["TP1"]
-        tp2 = row["TP2"]
-        direction = row["Direction"]
+        try:
+            price = okx.fetch_ticker(row["Symbol"])["last"]
 
-        # ⚠️ price simulation placeholder
-        # (real execution should be replaced by live price fetch)
-        last_price = entry
+            entry = float(row["Entry"])
+            sl = float(row["SL"])
+            tp1 = float(row["TP1"])
+            tp2 = float(row["TP2"])
+            direction = row["Direction"]
 
-        if direction == "LONG":
-            if last_price <= sl:
-                df.at[i, "Status"] = "SL HIT"
-                changed = True
-            elif last_price >= tp2:
-                df.at[i, "Status"] = "TP2 HIT"
-                changed = True
-            elif last_price >= tp1:
-                df.at[i, "Status"] = "TP1 HIT"
+            prev_status = row["Status"]
+            new_status = None
+
+            if direction == "LONG":
+                if price <= sl:
+                    new_status = "SL HIT"
+                elif price >= tp2:
+                    new_status = "TP2 HIT"
+                elif price >= tp1 and prev_status == "OPEN":
+                    new_status = "TP1 HIT"
+
+            else:  # SHORT
+                if price >= sl:
+                    new_status = "SL HIT"
+                elif price <= tp2:
+                    new_status = "TP2 HIT"
+                elif price <= tp1 and prev_status == "OPEN":
+                    new_status = "TP1 HIT"
+
+            if new_status and row.get("Alerted") != new_status:
+                df.at[i, "Status"] = new_status
+                df.at[i, "Alerted"] = new_status
                 changed = True
 
-        elif direction == "SHORT":
-            if last_price >= sl:
-                df.at[i, "Status"] = "SL HIT"
-                changed = True
-            elif last_price <= tp2:
-                df.at[i, "Status"] = "TP2 HIT"
-                changed = True
-            elif last_price <= tp1:
-                df.at[i, "Status"] = "TP1 HIT"
-                changed = True
+                # 📩 TELEGRAM ALERT
+                try:
+                    msg = format_trade_update(df.loc[i].to_dict())
+                    send_telegram_message(msg)
+                except Exception as e:
+                    print("Telegram error:", e)
+
+        except Exception:
+            continue
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
@@ -151,18 +152,11 @@ def auto_close_signals():
 # MERGE HISTORY (RESTORE CSV)
 # =====================================================
 def merge_signal_history(upload_df: pd.DataFrame) -> int:
-    """
-    Merge uploaded CSV without duplicating signals
-    Identity = Time + Symbol + Mode
-    """
-
     _init_file()
     df = load_signal_history()
 
     key_cols = ["Time", "Symbol", "Mode"]
-    existing_keys = set(
-        tuple(row) for row in df[key_cols].values
-    )
+    existing_keys = set(tuple(row) for row in df[key_cols].values)
 
     added = 0
     rows = []
