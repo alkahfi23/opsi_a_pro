@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — SIGNAL HISTORY ENGINE
-# FINAL | STABLE | REGIME FREEZE + TELEGRAM ALERT
+# FINAL | STABLE | REGIME FREEZE + TELEGRAM ALERT + REGIME FLIP
 # =====================================================
 
 import os
@@ -8,7 +8,13 @@ import pandas as pd
 
 from config import SIGNAL_LOG_FILE
 from exchange import get_okx
-from telegram_bot import send_telegram_message, format_trade_update
+from telegram_bot import (
+    send_telegram_message,
+    format_trade_update
+)
+from exchange import fetch_ohlcv
+from scoring import institutional_score
+from regime import detect_market_regime
 
 
 # =====================================================
@@ -19,10 +25,12 @@ COLUMNS = [
     "Symbol",
     "Phase",
     "Regime",              # 🔒 REGIME FREEZE (ENTRY)
+    "CurrentRegime",       # 🔄 LIVE REGIME
+    "RegimeShift",         # 🚨 FLAG
     "Score",
     "Entry",
-    "SL",                  # EXECUTION SL
-    "SL_Invalidation",     # STRUCTURE SL (HTF)
+    "SL",
+    "SL_Invalidation",
     "TP1",
     "TP2",
     "Status",
@@ -30,8 +38,6 @@ COLUMNS = [
     "Direction",
     "PositionSize",
     "AutoLabel",
-    "CurrentRegime",     # 🔄 live regime
-    "RegimeShift",       # 🚨 flag
     "Alerted"              # ⛔ anti spam telegram
 ]
 
@@ -41,7 +47,9 @@ COLUMNS = [
 # =====================================================
 def _init_file():
     if not os.path.exists(SIGNAL_LOG_FILE):
-        pd.DataFrame(columns=COLUMNS).to_csv(SIGNAL_LOG_FILE, index=False)
+        pd.DataFrame(columns=COLUMNS).to_csv(
+            SIGNAL_LOG_FILE, index=False
+        )
 
 
 # =====================================================
@@ -66,7 +74,9 @@ def save_signal(signal: dict):
         "Time": signal.get("Time"),
         "Symbol": signal.get("Symbol"),
         "Phase": signal.get("Phase"),
-        "Regime": signal.get("Regime"),          # 🔒 freeze
+        "Regime": signal.get("Regime"),            # 🔒 freeze
+        "CurrentRegime": signal.get("Regime"),     # init sama
+        "RegimeShift": False,
         "Score": signal.get("Score"),
         "Entry": signal.get("Entry"),
         "SL": signal.get("SL"),
@@ -86,7 +96,7 @@ def save_signal(signal: dict):
 
 
 # =====================================================
-# AUTO CLOSE SIGNALS (REAL PRICE + TELEGRAM)
+# AUTO CLOSE SIGNALS (TP / SL + TELEGRAM)
 # =====================================================
 def auto_close_signals():
     if not os.path.exists(SIGNAL_LOG_FILE):
@@ -106,13 +116,11 @@ def auto_close_signals():
         try:
             price = okx.fetch_ticker(row["Symbol"])["last"]
 
-            entry = float(row["Entry"])
             sl = float(row["SL"])
             tp1 = float(row["TP1"])
             tp2 = float(row["TP2"])
             direction = row["Direction"]
 
-            prev_status = row["Status"]
             new_status = None
 
             if direction == "LONG":
@@ -120,28 +128,87 @@ def auto_close_signals():
                     new_status = "SL HIT"
                 elif price >= tp2:
                     new_status = "TP2 HIT"
-                elif price >= tp1 and prev_status == "OPEN":
+                elif price >= tp1 and row["Status"] == "OPEN":
                     new_status = "TP1 HIT"
-
-            else:  # SHORT
+            else:
                 if price >= sl:
                     new_status = "SL HIT"
                 elif price <= tp2:
                     new_status = "TP2 HIT"
-                elif price <= tp1 and prev_status == "OPEN":
+                elif price <= tp1 and row["Status"] == "OPEN":
                     new_status = "TP1 HIT"
 
-            if new_status and row.get("Alerted") != new_status:
+            if new_status and row["Alerted"] != new_status:
                 df.at[i, "Status"] = new_status
                 df.at[i, "Alerted"] = new_status
                 changed = True
 
-                # 📩 TELEGRAM ALERT
-                try:
-                    msg = format_trade_update(df.loc[i].to_dict())
-                    send_telegram_message(msg)
-                except Exception as e:
-                    print("Telegram error:", e)
+                msg = format_trade_update(
+                    df.loc[i].to_dict()
+                )
+                send_telegram_message(msg)
+
+        except Exception:
+            continue
+
+    if changed:
+        df.to_csv(SIGNAL_LOG_FILE, index=False)
+
+
+# =====================================================
+# REGIME FLIP MONITOR (OPEN POSITIONS)
+# =====================================================
+def monitor_regime_flip():
+    """
+    Alert jika regime berubah saat posisi masih OPEN
+    Tidak close posisi — hanya WARNING
+    """
+
+    if not os.path.exists(SIGNAL_LOG_FILE):
+        return
+
+    df = pd.read_csv(SIGNAL_LOG_FILE)
+    if df.empty:
+        return
+
+    okx = get_okx()
+    changed = False
+
+    for i, row in df.iterrows():
+        if row["Status"] != "OPEN":
+            continue
+
+        try:
+            symbol = row["Symbol"]
+
+            df4h = fetch_ohlcv(symbol, "4h", 200)
+            df1d = fetch_ohlcv(symbol, "1d", 200)
+
+            score_data = institutional_score(
+                df4h, df1d, row["Direction"]
+            )
+
+            current_regime = detect_market_regime(
+                df4h, df1d, score_data
+            )
+
+            df.at[i, "CurrentRegime"] = current_regime
+
+            if (
+                current_regime != row["Regime"]
+                and not row["RegimeShift"]
+            ):
+                df.at[i, "RegimeShift"] = True
+                changed = True
+
+                send_telegram_message(
+                    f"🚨 REGIME FLIP ALERT\n\n"
+                    f"Symbol : {symbol}\n"
+                    f"From   : {row['Regime']}\n"
+                    f"To     : {current_regime}\n\n"
+                    f"⚠️ Position still OPEN\n"
+                    f"Consider risk reduction"
+                )
 
         except Exception:
             continue
@@ -172,79 +239,5 @@ def merge_signal_history(upload_df: pd.DataFrame) -> int:
     if rows:
         df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
         df.to_csv(SIGNAL_LOG_FILE, index=False)
-
-
-# =====================================================
-# REGIME FLIP ALERT (NON-DESTRUCTIVE)
-# =====================================================
-def monitor_regime_flip():
-    """
-    Check regime change for OPEN positions
-    Send telegram alert if regime flips
-    """
-
-    from exchange import get_okx
-    from indicators import accumulation_distribution
-    from scoring import institutional_score
-    from regime import detect_market_regime
-    from telegram_bot import send_telegram_message
-
-    if not os.path.exists(SIGNAL_LOG_FILE):
-        return
-
-    df = pd.read_csv(SIGNAL_LOG_FILE)
-    if df.empty:
-        return
-
-    okx = get_okx()
-    changed = False
-
-    for i, row in df.iterrows():
-        if row["Status"] != "OPEN":
-            continue
-
-        try:
-            symbol = row["Symbol"]
-            entry_regime = row["Regime"]
-
-            # ===== fetch fresh data =====
-            df4h = fetch_ohlcv(symbol, "4h", 200)
-            df1d = fetch_ohlcv(symbol, "1d", 200)
-
-            score_data = institutional_score(
-                df4h, df1d, row["Direction"]
-            )
-
-            current_regime = detect_market_regime(
-                df4h, df1d, score_data
-            )
-
-            df.at[i, "CurrentRegime"] = current_regime
-
-            if (
-                current_regime != entry_regime
-                and not row.get("RegimeShift", False)
-            ):
-                df.at[i, "RegimeShift"] = True
-                changed = True
-
-                # 📩 TELEGRAM ALERT
-                msg = (
-                    f"🚨 REGIME FLIP ALERT\n\n"
-                    f"Symbol : {symbol}\n"
-                    f"From   : {entry_regime}\n"
-                    f"To     : {current_regime}\n\n"
-                    f"⚠️ Position still OPEN\n"
-                    f"Consider risk reduction"
-                )
-
-                send_telegram_message(msg)
-
-        except Exception:
-            continue
-
-    if changed:
-        df.to_csv(SIGNAL_LOG_FILE, index=False)
-
 
     return added
