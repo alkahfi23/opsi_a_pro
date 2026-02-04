@@ -108,10 +108,3 @@ TRADE_RESULT_FILE  = "trade_results.csv"
 FUTURES_TRADE_FILE = "futures_trades.csv"
 
 
-# =====================================================
-# TELEGRAM CONFIG
-# =====================================================
-TELEGRAM_BOT_TOKEN = "7917140184:AAGDVPcLNea5h9X03-dzzaOuz0LOrtko-CM"
-TELEGRAM_CHAT_ID = "1455112133"
-
-TELEGRAM_ENABLE = True
