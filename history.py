@@ -1,18 +1,23 @@
 # =====================================================
 # OPSI A PRO — SIGNAL HISTORY ENGINE
-# FINAL | STABLE | REGIME FREEZE + TELEGRAM ALERT + REGIME FLIP
+# FINAL | STABLE | REGIME FREEZE + TELEGRAM + COOLDOWN
 # =====================================================
 
 import os
 import pandas as pd
+from datetime import datetime, timedelta
 
-from config import SIGNAL_LOG_FILE
-from exchange import get_okx
+from config import (
+    SIGNAL_LOG_FILE,
+    SIGNAL_COOLDOWN_MINUTES,
+    COOLDOWN_BY_MODE
+)
+
+from exchange import get_okx, fetch_ohlcv
 from telegram_bot import (
     send_telegram_message,
     format_trade_update
 )
-from exchange import fetch_ohlcv
 from scoring import institutional_score
 from regime import detect_market_regime
 
@@ -24,9 +29,9 @@ COLUMNS = [
     "Time",
     "Symbol",
     "Phase",
-    "Regime",              # 🔒 REGIME FREEZE (ENTRY)
-    "CurrentRegime",       # 🔄 LIVE REGIME
-    "RegimeShift",         # 🚨 FLAG
+    "Regime",              # 🔒 entry regime (freeze)
+    "CurrentRegime",       # 🔄 live regime
+    "RegimeShift",         # 🚨 flag
     "Score",
     "Entry",
     "SL",
@@ -64,7 +69,43 @@ def load_signal_history():
 
 
 # =====================================================
-# SAVE SIGNAL (ENTRY)
+# SYMBOL COOLDOWN CHECK (ANTI DUPLICATE)
+# =====================================================
+def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
+    df = load_signal_history()
+    if df.empty:
+        return False
+
+    df = df[df["Symbol"] == symbol]
+    if COOLDOWN_BY_MODE:
+        df = df[df["Mode"] == mode]
+
+    if df.empty:
+        return False
+
+    last = df.sort_values("Time", ascending=False).iloc[0]
+
+    # masih OPEN → BLOCK
+    if last["Status"] == "OPEN":
+        return True
+
+    # cek waktu cooldown
+    try:
+        last_time = datetime.strptime(
+            last["Time"], "%Y-%m-%d %H:%M WIB"
+        )
+    except Exception:
+        return False
+
+    cooldown_until = last_time + timedelta(
+        minutes=SIGNAL_COOLDOWN_MINUTES
+    )
+
+    return datetime.now() < cooldown_until
+
+
+# =====================================================
+# SAVE SIGNAL (ENTRY SNAPSHOT)
 # =====================================================
 def save_signal(signal: dict):
     _init_file()
@@ -74,8 +115,8 @@ def save_signal(signal: dict):
         "Time": signal.get("Time"),
         "Symbol": signal.get("Symbol"),
         "Phase": signal.get("Phase"),
-        "Regime": signal.get("Regime"),            # 🔒 freeze
-        "CurrentRegime": signal.get("Regime"),     # init sama
+        "Regime": signal.get("Regime"),          # 🔒 freeze
+        "CurrentRegime": signal.get("Regime"),
         "RegimeShift": False,
         "Score": signal.get("Score"),
         "Entry": signal.get("Entry"),
@@ -96,7 +137,7 @@ def save_signal(signal: dict):
 
 
 # =====================================================
-# AUTO CLOSE SIGNALS (TP / SL + TELEGRAM)
+# AUTO CLOSE (TP / SL) + TELEGRAM
 # =====================================================
 def auto_close_signals():
     if not os.path.exists(SIGNAL_LOG_FILE):
@@ -143,10 +184,9 @@ def auto_close_signals():
                 df.at[i, "Alerted"] = new_status
                 changed = True
 
-                msg = format_trade_update(
-                    df.loc[i].to_dict()
+                send_telegram_message(
+                    format_trade_update(df.loc[i].to_dict())
                 )
-                send_telegram_message(msg)
 
         except Exception:
             continue
@@ -156,14 +196,9 @@ def auto_close_signals():
 
 
 # =====================================================
-# REGIME FLIP MONITOR (OPEN POSITIONS)
+# REGIME FLIP MONITOR (OPEN ONLY)
 # =====================================================
 def monitor_regime_flip():
-    """
-    Alert jika regime berubah saat posisi masih OPEN
-    Tidak close posisi — hanya WARNING
-    """
-
     if not os.path.exists(SIGNAL_LOG_FILE):
         return
 
@@ -171,7 +206,6 @@ def monitor_regime_flip():
     if df.empty:
         return
 
-    okx = get_okx()
     changed = False
 
     for i, row in df.iterrows():
@@ -218,21 +252,21 @@ def monitor_regime_flip():
 
 
 # =====================================================
-# MERGE HISTORY (RESTORE CSV)
+# MERGE HISTORY (CSV RESTORE)
 # =====================================================
 def merge_signal_history(upload_df: pd.DataFrame) -> int:
     _init_file()
     df = load_signal_history()
 
     key_cols = ["Time", "Symbol", "Mode"]
-    existing_keys = set(tuple(row) for row in df[key_cols].values)
+    existing = set(tuple(row) for row in df[key_cols].values)
 
-    added = 0
     rows = []
+    added = 0
 
     for _, row in upload_df.iterrows():
         key = tuple(row.get(col) for col in key_cols)
-        if key not in existing_keys:
+        if key not in existing:
             rows.append(row)
             added += 1
 
