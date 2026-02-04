@@ -1,68 +1,89 @@
+# =====================================================
+# OPSI A PRO — TELEGRAM BOT (DUAL MODE)
+# Streamlit UI + Render Worker SAFE
+# =====================================================
+
+import os
 import requests
-import streamlit as st
 
-BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+# =========================
+# TOKEN LOADING (SAFE)
+# =========================
+BOT_TOKEN = None
+CHAT_ID = None
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+# Try ENV (Render / Production)
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Fallback to Streamlit secrets (UI only)
+if BOT_TOKEN is None or CHAT_ID is None:
+    try:
+        import streamlit as st
+        BOT_TOKEN = BOT_TOKEN or st.secrets.get("TELEGRAM_BOT_TOKEN")
+        CHAT_ID = CHAT_ID or st.secrets.get("TELEGRAM_CHAT_ID")
+    except Exception:
+        pass
 
 
+if not BOT_TOKEN or not CHAT_ID:
+    raise RuntimeError("❌ Telegram token / chat_id not found")
+
+
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+
+# =====================================================
+# SEND MESSAGE
+# =====================================================
 def send_telegram_message(text: str):
     payload = {
         "chat_id": CHAT_ID,
         "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "parse_mode": "Markdown"
     }
 
-    r = requests.post(TELEGRAM_URL, json=payload, timeout=10)
-
-    # ⛔ WAJIB raise kalau gagal
-    if r.status_code != 200:
-        raise RuntimeError(f"Telegram error: {r.text}")
+    r = requests.post(API_URL, json=payload, timeout=10)
+    if not r.ok:
+        raise RuntimeError(r.text)
 
 
+# =====================================================
+# FORMAT ENTRY SIGNAL
+# =====================================================
 def format_signal_message(sig: dict) -> str:
     return f"""
-<b>🚨 OPSI A PRO SIGNAL</b>
+🚀 *NEW SIGNAL*
+━━━━━━━━━━━━
+*Symbol:* `{sig['Symbol']}`
+*Mode:* {sig['Mode']}
+*Direction:* {sig['Direction']}
+*Score:* {sig['Score']}
+*Regime:* {sig['Regime']}
 
-<b>Symbol:</b> {sig['Symbol']}
-<b>Mode:</b> {sig['Mode']}
-<b>Direction:</b> {sig['Direction']}
-<b>Score:</b> {sig['Score']}
-<b>Regime:</b> {sig['Regime']}
+*Entry:* {sig['Entry']}
+*SL:* {sig['SL']}
+*TP1:* {sig['TP1']}
+*TP2:* {sig['TP2']}
 
-<b>Entry:</b> {sig['Entry']}
-<b>SL:</b> {sig['SL']}
-<b>TP1:</b> {sig['TP1']}
-<b>TP2:</b> {sig['TP2']}
+⏰ {sig['Time']}
+""".strip()
 
-<b>Time:</b> {sig['Time']}
-"""
 
+# =====================================================
+# FORMAT TRADE UPDATE (TP / SL)
+# =====================================================
 def format_trade_update(row: dict) -> str:
-    icon = {
-        "TP1 HIT": "✅",
-        "TP2 HIT": "🎯",
-        "SL HIT": "🛑"
-    }.get(row["Status"], "ℹ️")
-
     return f"""
-{icon} <b>OPSI A PRO — TRADE UPDATE</b>
+📢 *TRADE UPDATE*
+━━━━━━━━━━━━
+*Symbol:* `{row['Symbol']}`
+*Status:* {row['Status']}
+*Mode:* {row['Mode']}
+*Direction:* {row['Direction']}
 
-<b>Symbol:</b> {row['Symbol']}
-<b>Mode:</b> {row['Mode']}
-<b>Direction:</b> {row['Direction']}
-<b>Status:</b> {row['Status']}
-
-<b>Entry:</b> {row['Entry']}
-<b>SL:</b> {row['SL']}
-<b>TP1:</b> {row['TP1']}
-<b>TP2:</b> {row['TP2']}
-
-<b>Score:</b> {row['Score']}
-<b>Regime (Entry):</b> {row.get('Regime')}
-
-<b>Time:</b> {row['Time']}
-"""
-
+*Entry:* {row['Entry']}
+*Last SL:* {row['SL']}
+*TP1:* {row['TP1']}
+*TP2:* {row['TP2']}
+""".strip()
