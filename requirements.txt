@@ -2,5 +2,7 @@ streamlit
 ccxt
 pandas
 numpy
+requests
 plotly
 python-dateutil
+
