@@ -147,8 +147,9 @@ with tab1:
                 try:
                     msg = format_signal_message(sig)
                     send_telegram_message(msg)
-                except Exception:
-                    pass
+                    st.toast("📩 Telegram sent", icon="📨")
+                except Exception as e:
+                    st.error(f"Telegram failed: {e}")
 
             progress.progress(i / total)
             time.sleep(RATE_LIMIT_DELAY)
