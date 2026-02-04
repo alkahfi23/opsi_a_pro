@@ -4,21 +4,17 @@
 # =====================================================
 
 # =========================
-# ENV (NO STREAMLIT HERE)
+# CORE IMPORT (NO STREAMLIT)
 # =========================
-import os
 import time
 from datetime import datetime
 
-# =========================
-# CORE IMPORT (NO st)
-# =========================
 from exchange import get_okx
 from signals import check_signal
 from history import (
     save_signal,
     auto_close_signals,
-    is_symbol_in_cooldown      # ✅ ANTI SPAM
+    is_symbol_in_cooldown
 )
 from telegram_bot import (
     send_telegram_message,
@@ -45,7 +41,7 @@ BALANCE_DUMMY = 10_000     # simulasi only
 # SIMPLE LOGGER
 # =========================
 def log(msg: str):
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
 
@@ -74,8 +70,7 @@ def scan_market(mode: str):
         if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active")
-            and s.endswith("/USDT")
+            if m.get("spot") and m.get("active") and s.endswith("/USDT")
         ][:MAX_SCAN_SYMBOLS]
     )
 
@@ -87,7 +82,7 @@ def scan_market(mode: str):
     for symbol in symbols:
 
         # =========================
-        # COOLDOWN CHECK
+        # COOLDOWN CHECK (ANTI SPAM)
         # =========================
         if is_symbol_in_cooldown(symbol, mode):
             continue
@@ -98,25 +93,30 @@ def scan_market(mode: str):
             log(f"⚠️ Signal error {symbol}: {e}")
             continue
 
-        if sig and sig.get("SignalType") == "TRADE_EXECUTION":
+        if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
+            continue
 
-            save_signal(sig)
-            log(
-                f"✅ SIGNAL {symbol} "
-                f"{sig['Direction']} | "
-                f"Score {sig['Score']} | "
-                f"{sig['Regime']}"
-            )
+        # =========================
+        # SAVE SIGNAL
+        # =========================
+        save_signal(sig)
 
-            # =========================
-            # TELEGRAM ALERT
-            # =========================
-            try:
-                msg = format_signal_message(sig)
-                send_telegram_message(msg)
-                log("📩 Telegram sent")
-            except Exception as e:
-                log(f"❌ Telegram error: {e}")
+        log(
+            f"✅ SIGNAL {symbol} | "
+            f"{sig['Direction']} | "
+            f"Score {sig['Score']} | "
+            f"{sig['Regime']}"
+        )
+
+        # =========================
+        # TELEGRAM ALERT (ENTRY)
+        # =========================
+        try:
+            msg = format_signal_message(sig)
+            send_telegram_message(msg)
+            log("📩 Telegram sent")
+        except Exception as e:
+            log(f"❌ Telegram error: {e}")
 
         time.sleep(RATE_LIMIT_DELAY)
 
@@ -130,13 +130,13 @@ if __name__ == "__main__":
     while True:
         try:
             # =========================
-            # AUTO MAINTENANCE
+            # AUTO MAINTENANCE FIRST
             # =========================
             auto_close_signals()
             log("🔧 Auto maintenance done")
 
             # =========================
-            # SCANS
+            # MARKET SCANS
             # =========================
             scan_market("FUTURES")
             scan_market("SPOT")
