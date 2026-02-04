@@ -29,7 +29,8 @@ from history import (
     save_signal,
     auto_close_signals,
     merge_signal_history,
-    monitor_regime_flip
+    monitor_regime_flip,
+    is_symbol_in_cooldown      # ✅ ANTI DUPLICATE
 )
 
 from montecarlo import run_monte_carlo
@@ -58,8 +59,8 @@ okx = get_okx()
 # AUTO MAINTENANCE (SAFE FOR STREAMLIT CLOUD)
 # =====================================================
 try:
-    auto_close_signals()     # TP / SL check + telegram
-    monitor_regime_flip()    # regime flip alert
+    auto_close_signals()      # TP / SL alert
+    monitor_regime_flip()     # regime flip alert
 except Exception:
     pass
 
@@ -115,15 +116,13 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 with tab1:
     if st.button("🔍 Scan Market"):
 
-        # =========================
-        # SYMBOL UNIVERSE
-        # =========================
         if MODE == "FUTURES":
             symbols = FUTURES_BIG_COINS
         else:
             symbols = [
                 s for s, m in okx.markets.items()
-                if m.get("spot") and m.get("active") and s.endswith("/USDT")
+                if m.get("spot") and m.get("active")
+                and s.endswith("/USDT")
             ][:MAX_SCAN_SYMBOLS]
 
         found = []
@@ -134,31 +133,33 @@ with tab1:
         for i, symbol in enumerate(symbols, 1):
             status.info(f"Scanning {symbol} ({i}/{total})")
 
+            # =========================
+            # ANTI DUPLICATE / COOLDOWN
+            # =========================
+            if is_symbol_in_cooldown(symbol, MODE):
+                progress.progress(i / total)
+                continue
+
             try:
                 sig = check_signal(symbol, MODE, BALANCE)
             except Exception:
+                progress.progress(i / total)
                 continue
 
             if sig and sig.get("SignalType") == "TRADE_EXECUTION":
 
-                # prevent duplicate telegram
-                before = len(load_signal_history())
-
                 save_signal(sig)
-                after = len(load_signal_history())
+                found.append(sig)
 
-                if after > before:
-                    found.append(sig)
-
-                    # =========================
-                    # TELEGRAM ALERT (ENTRY)
-                    # =========================
-                    try:
-                        msg = format_signal_message(sig)
-                        send_telegram_message(msg)
-                        st.toast("📩 Telegram sent", icon="📨")
-                    except Exception as e:
-                        st.warning(f"Telegram error: {e}")
+                # =========================
+                # TELEGRAM ENTRY ALERT
+                # =========================
+                try:
+                    msg = format_signal_message(sig)
+                    send_telegram_message(msg)
+                    st.toast(f"📩 {symbol} sent", icon="📨")
+                except Exception as e:
+                    st.warning(f"Telegram error: {e}")
 
             progress.progress(i / total)
             time.sleep(RATE_LIMIT_DELAY)
@@ -185,8 +186,8 @@ with tab2:
         "Time",
         "Symbol",
         "Phase",
-        "Regime",          # frozen
-        "CurrentRegime",   # live
+        "Regime",
+        "CurrentRegime",
         "RegimeShift",
         "Score",
         "Entry",
@@ -208,11 +209,6 @@ with tab2:
     )
 
     st.divider()
-
-    # =========================
-    # RESTORE CSV
-    # =========================
-    st.subheader("📤 Restore Riwayat dari CSV")
 
     uploaded = st.file_uploader(
         "Upload file signal_history.csv lama",
@@ -279,118 +275,4 @@ with tab3:
                         opacity=0.3
                     ))
 
-                st.plotly_chart(fig, use_container_width=True)
-
-
-# =====================================================
-# TAB 4 — ANALISA SINGLE COIN
-# =====================================================
-with tab4:
-    st.subheader("🎯 Analisa Single Coin")
-
-    symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
-        s for s, m in okx.markets.items()
-        if m.get("spot") and m.get("active") and s.endswith("/USDT")
-    ]
-
-    col1, col2 = st.columns(2)
-    with col1:
-        symbol = st.selectbox("Pilih Coin", symbols)
-    with col2:
-        mode_an = st.radio(
-            "Mode Analisa",
-            ["SPOT", "FUTURES"],
-            horizontal=True
-        )
-
-    bal_an = st.number_input(
-        "Balance untuk Analisa (USDT)",
-        value=10000.0,
-        step=100.0
-    )
-
-    if st.button("🔍 Analyze Coin"):
-        res = analyze_single_coin(symbol, mode_an, bal_an)
-
-        st.markdown(f"## 📊 Hasil Analisa — `{symbol}`")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Trend", res["Trend"])
-        c2.metric("Score", res["Score"])
-        c3.metric("Mode", mode_an)
-
-        if res["Reasons"]:
-            st.error("❌ NO TRADE")
-            for r in res["Reasons"]:
-                st.write(f"• {r}")
-        else:
-            st.success("✅ SETUP VALID")
-            st.json({
-                "Entry": res["Entry"],
-                "SL": res["SL"],
-                "TP1": res["TP1"],
-                "TP2": res["TP2"],
-                "Position Size": res["PositionSize"]
-            })
-
-
-# =====================================================
-# TAB 5 — SCORE HEATMAP
-# =====================================================
-with tab5:
-    st.subheader("🔥 Institutional Score Heatmap")
-    from heatmap import generate_score_heatmap
-
-    symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
-        s for s, m in okx.markets.items()
-        if m.get("spot") and m.get("active") and s.endswith("/USDT")
-    ][:60]
-
-    if st.button("🎨 Generate Heatmap"):
-        df_hm = generate_score_heatmap(okx, symbols)
-
-        if not df_hm.empty:
-            st.dataframe(df_hm, use_container_width=True)
-
-            fig = px.imshow(
-                df_hm.set_index("Symbol")[["Score"]],
-                aspect="auto",
-                title="Institutional Score Heatmap"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-
-# =====================================================
-# TAB 6 — Δ SCORE ROTATION
-# =====================================================
-with tab6:
-    st.subheader("🔄 Institutional Rotation (Δ Score)")
-    from heatmap_delta import take_score_snapshot, compute_score_delta
-
-    symbols = FUTURES_BIG_COINS if MODE == "FUTURES" else [
-        s for s, m in okx.markets.items()
-        if m.get("spot") and m.get("active") and s.endswith("/USDT")
-    ][:60]
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("📸 Take Snapshot"):
-            take_score_snapshot(okx, symbols)
-            st.success("Snapshot saved")
-
-    with col2:
-        if st.button("🔥 Show Rotation"):
-            df_delta = compute_score_delta()
-
-            if df_delta is None or df_delta.empty:
-                st.warning("Belum cukup snapshot")
-            else:
-                st.dataframe(df_delta, use_container_width=True)
-
-                fig = px.imshow(
-                    df_delta.set_index("Symbol")[["Delta"]],
-                    aspect="auto",
-                    title="Δ Institutional Score (Rotation)"
-                )
                 st.plotly_chart(fig, use_container_width=True)
