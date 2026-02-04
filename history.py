@@ -14,10 +14,7 @@ from config import (
 )
 
 from exchange import get_okx, fetch_ohlcv
-from telegram_bot import (
-    send_telegram_message,
-    format_trade_update
-)
+from telegram_bot import send_telegram_message, format_trade_update
 from scoring import institutional_score
 from regime import detect_market_regime
 
@@ -43,7 +40,7 @@ COLUMNS = [
     "Direction",
     "PositionSize",
     "AutoLabel",
-    "Alerted"              # ⛔ anti spam telegram
+    "Alerted"
 ]
 
 
@@ -77,6 +74,7 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
         return False
 
     df = df[df["Symbol"] == symbol]
+
     if COOLDOWN_BY_MODE:
         df = df[df["Mode"] == mode]
 
@@ -85,11 +83,11 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
 
     last = df.sort_values("Time", ascending=False).iloc[0]
 
-    # masih OPEN → BLOCK
+    # ⛔ masih OPEN → block langsung
     if last["Status"] == "OPEN":
         return True
 
-    # cek waktu cooldown
+    # ⏳ cooldown time check
     try:
         last_time = datetime.strptime(
             last["Time"], "%Y-%m-%d %H:%M WIB"
@@ -115,7 +113,7 @@ def save_signal(signal: dict):
         "Time": signal.get("Time"),
         "Symbol": signal.get("Symbol"),
         "Phase": signal.get("Phase"),
-        "Regime": signal.get("Regime"),          # 🔒 freeze
+        "Regime": signal.get("Regime"),
         "CurrentRegime": signal.get("Regime"),
         "RegimeShift": False,
         "Score": signal.get("Score"),
@@ -132,7 +130,10 @@ def save_signal(signal: dict):
         "Alerted": ""
     }
 
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df = pd.concat(
+        [df, pd.DataFrame([row])],
+        ignore_index=True
+    )
     df.to_csv(SIGNAL_LOG_FILE, index=False)
 
 
@@ -271,7 +272,10 @@ def merge_signal_history(upload_df: pd.DataFrame) -> int:
             added += 1
 
     if rows:
-        df = pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
+        df = pd.concat(
+            [df, pd.DataFrame(rows)],
+            ignore_index=True
+        )
         df.to_csv(SIGNAL_LOG_FILE, index=False)
 
     return added
