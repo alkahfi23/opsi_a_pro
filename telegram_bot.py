@@ -39,3 +39,30 @@ def format_signal_message(sig: dict) -> str:
 
 <b>Time:</b> {sig['Time']}
 """
+
+def format_trade_update(row: dict) -> str:
+    icon = {
+        "TP1 HIT": "✅",
+        "TP2 HIT": "🎯",
+        "SL HIT": "🛑"
+    }.get(row["Status"], "ℹ️")
+
+    return f"""
+{icon} <b>OPSI A PRO — TRADE UPDATE</b>
+
+<b>Symbol:</b> {row['Symbol']}
+<b>Mode:</b> {row['Mode']}
+<b>Direction:</b> {row['Direction']}
+<b>Status:</b> {row['Status']}
+
+<b>Entry:</b> {row['Entry']}
+<b>SL:</b> {row['SL']}
+<b>TP1:</b> {row['TP1']}
+<b>TP2:</b> {row['TP2']}
+
+<b>Score:</b> {row['Score']}
+<b>Regime (Entry):</b> {row.get('Regime')}
+
+<b>Time:</b> {row['Time']}
+"""
+
