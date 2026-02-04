@@ -3,6 +3,7 @@
 # CRON-LIKE | RENDER SAFE
 # =====================================================
 
+import warnings
 import time
 from exchange import get_okx
 from signals import check_signal
@@ -18,6 +19,10 @@ from config import (
 # =========================
 # CONFIG
 # =========================
+
+os.environ["STREAMLIT_SUPPRESS_CONFIG_WARNINGS"] = "1"
+warnings.filterwarnings("ignore", module="streamlit")
+
 SCAN_INTERVAL = 300  # 5 menit
 BALANCE_DUMMY = 10_000  # tidak eksekusi real
 
