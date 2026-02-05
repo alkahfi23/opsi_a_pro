@@ -1,9 +1,10 @@
 # =====================================================
-# OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | PRODUCTION SAFE | INVESTOR GRADE
+# OPSI A PRO — AUTO SCANNER BOT (FINAL)
+# CRON-LIKE | SAFE | ANTI-SPAM | DAILY SUMMARY
 # =====================================================
 
 import time
+import os
 from datetime import datetime, timezone
 
 from exchange import get_okx
@@ -15,7 +16,10 @@ from history import (
     calculate_bot_rating
 )
 from telegram_bot import send_telegram_message
-from scheduler import is_optimal_spot, is_optimal_futures
+from scheduler import (
+    is_optimal_spot,
+    is_optimal_futures
+)
 from config import (
     FUTURES_BIG_COINS,
     MAX_SCAN_SYMBOLS,
@@ -26,7 +30,9 @@ from config import (
 # CONFIG
 # =====================================================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi (no execution)
+BALANCE_DUMMY = 10_000     # simulasi
+SUMMARY_FLAG_FILE = "daily_summary.flag"
+
 
 # =====================================================
 # LOGGER
@@ -35,11 +41,32 @@ def log(msg: str):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
+
 # =====================================================
-# BUILD TELEGRAM MESSAGE (SAFE)
+# DAILY SUMMARY HELPERS
 # =====================================================
-def build_message(sig: dict, stats: dict | None):
-    msg = (
+def summary_sent_today() -> bool:
+    if not os.path.exists(SUMMARY_FLAG_FILE):
+        return False
+
+    with open(SUMMARY_FLAG_FILE, "r") as f:
+        last_date = f.read().strip()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return last_date == today
+
+
+def mark_summary_sent():
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with open(SUMMARY_FLAG_FILE, "w") as f:
+        f.write(today)
+
+
+# =====================================================
+# BUILD TELEGRAM MESSAGE (PLAIN TEXT)
+# =====================================================
+def build_signal_message(sig: dict) -> str:
+    return (
         "OPSI A PRO SIGNAL\n\n"
         f"Symbol     : {sig['Symbol']}\n"
         f"Mode       : {sig['Mode']}\n"
@@ -50,35 +77,16 @@ def build_message(sig: dict, stats: dict | None):
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
         f"TP2        : {sig['TP2']}\n"
-        f"Time (WIB) : {sig.get('TimeWIB','')}\n"
+        f"Time       : {sig.get('TimeWIB', sig.get('Time', ''))}"
     )
 
-    # =========================
-    # BOT PERFORMANCE SNAPSHOT
-    # =========================
-    if stats:
-        if stats.get("valid"):
-            msg += (
-                "\nBOT PERFORMANCE\n"
-                f"Rating     : {stats['rating']}\n"
-                f"Win Rate   : {stats['win_rate']}%\n"
-                f"Expectancy : {stats['expectancy']} R\n"
-                f"Trades     : {stats['trades']}\n"
-            )
-        else:
-            msg += (
-                "\nBOT STATUS\n"
-                f"Trades     : {stats['trades']}\n"
-                "Rating     : WARM-UP\n"
-                "Status     : Collecting data\n"
-            )
-
-    return msg
 
 # =====================================================
 # SCAN MARKET
+# RETURN True  = scan dilakukan
+# RETURN False = skip (di luar jam)
 # =====================================================
-def scan_market(mode: str):
+def scan_market(mode: str) -> bool:
     okx = get_okx()
 
     # =========================
@@ -86,11 +94,11 @@ def scan_market(mode: str):
     # =========================
     if mode == "FUTURES" and not is_optimal_futures():
         log("⏳ FUTURES outside optimal hours — skip")
-        return
+        return False
 
     if mode == "SPOT" and not is_optimal_spot():
         log("⏳ SPOT outside optimal hours — skip")
-        return
+        return False
 
     # =========================
     # SYMBOL UNIVERSE
@@ -100,8 +108,7 @@ def scan_market(mode: str):
         if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active")
-            and s.endswith("/USDT")
+            if m.get("spot") and m.get("active") and s.endswith("/USDT")
         ][:MAX_SCAN_SYMBOLS]
     )
 
@@ -112,7 +119,7 @@ def scan_market(mode: str):
     # =========================
     for symbol in symbols:
 
-        # ⛔ COOLDOWN (ANTI DUPLICATE)
+        # ⛔ Anti duplicate / cooldown
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -128,11 +135,7 @@ def scan_market(mode: str):
         # =========================
         # SAVE SIGNAL
         # =========================
-        try:
-            save_signal(sig)
-        except Exception as e:
-            log(f"❌ Save signal failed {symbol}: {e}")
-            continue
+        save_signal(sig)
 
         log(
             f"✅ SIGNAL {symbol} | "
@@ -145,14 +148,15 @@ def scan_market(mode: str):
         # TELEGRAM ALERT
         # =========================
         try:
-            stats = calculate_bot_rating()
-            msg = build_message(sig, stats)
-            send_telegram_message(msg)
+            send_telegram_message(build_signal_message(sig))
             log("📩 Telegram sent")
         except Exception as e:
             log(f"❌ Telegram error: {e}")
 
         time.sleep(RATE_LIMIT_DELAY)
+
+    return True
+
 
 # =====================================================
 # MAIN LOOP (CRON-LIKE)
@@ -164,7 +168,6 @@ if __name__ == "__main__":
         try:
             # =========================
             # AUTO MAINTENANCE
-            # (TP / SL update + Telegram)
             # =========================
             auto_close_signals()
             log("🔧 Auto maintenance done")
@@ -172,10 +175,30 @@ if __name__ == "__main__":
             # =========================
             # MARKET SCANS
             # =========================
-            scan_market("FUTURES")
-            scan_market("SPOT")
+            fut_active = scan_market("FUTURES")
+            spot_active = scan_market("SPOT")
 
-            log("😴 Cycle complete — waiting next run")
+            # =========================
+            # DAILY SUMMARY (1x / day)
+            # =========================
+            if not fut_active and not spot_active:
+                if not summary_sent_today():
+                    stats = calculate_bot_rating()
+
+                    if stats and stats.get("valid"):
+                        send_telegram_message(
+                            "OPSI A PRO — DAILY SUMMARY\n\n"
+                            f"Rating     : {stats['rating']}\n"
+                            f"Win Rate   : {stats['win_rate']}%\n"
+                            f"Expectancy : {stats['expectancy']} R\n"
+                            f"Trades     : {stats['trades']}\n\n"
+                            "Market currently outside optimal hours"
+                        )
+                        mark_summary_sent()
+                        log("📊 Daily summary sent")
+
+            else:
+                log("📡 Active session — summary skipped")
 
         except Exception as e:
             log(f"🔥 Scanner crash prevented: {e}")
