@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | NO STREAMLIT
+# CRON-LIKE | RENDER SAFE | NO STREAMLIT | CLEAN
 # =====================================================
 
 import time
@@ -12,25 +12,34 @@ from history import (
     save_signal,
     auto_close_signals,
     is_symbol_in_cooldown,
-    calculate_bot_rating
+    calculate_bot_rating,
 )
 from telegram_bot import send_telegram_message
 from scheduler import is_optimal_spot, is_optimal_futures
 from config import (
     FUTURES_BIG_COINS,
     MAX_SCAN_SYMBOLS,
-    RATE_LIMIT_DELAY
+    RATE_LIMIT_DELAY,
 )
 
+# =====================================================
+# CONFIG
+# =====================================================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi
+BALANCE_DUMMY = 10_000     # simulasi only
 
 
+# =====================================================
+# LOGGER
+# =====================================================
 def log(msg: str):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
 
+# =====================================================
+# TELEGRAM MESSAGE BUILDER (PLAIN TEXT)
+# =====================================================
 def build_message(sig: dict, stats: dict | None):
     msg = (
         "OPSI A PRO SIGNAL\n\n"
@@ -43,7 +52,7 @@ def build_message(sig: dict, stats: dict | None):
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
         f"TP2        : {sig['TP2']}\n"
-        f"Time       : {sig['Time']}\n"
+        f"Time       : {sig.get('TimeWIB', '')}\n"
     )
 
     if stats and stats.get("valid"):
@@ -58,9 +67,15 @@ def build_message(sig: dict, stats: dict | None):
     return msg
 
 
+# =====================================================
+# SCAN MARKET
+# =====================================================
 def scan_market(mode: str):
     okx = get_okx()
 
+    # =========================
+    # TIME FILTER
+    # =========================
     if mode == "FUTURES" and not is_optimal_futures():
         log("⏳ FUTURES outside optimal hours — skip")
         return
@@ -69,6 +84,9 @@ def scan_market(mode: str):
         log("⏳ SPOT outside optimal hours — skip")
         return
 
+    # =========================
+    # SYMBOL UNIVERSE
+    # =========================
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
@@ -80,58 +98,12 @@ def scan_market(mode: str):
 
     log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
 
+    # =========================
+    # MAIN LOOP
+    # =========================
     for symbol in symbols:
 
-        if is_symbol_in_cooldown(symbol, mode):
-            continue
-
-        try:
-            sig = check_signal(symbol, mode, BALANCE_DUMMY)
-        except Exception as e:
-            log(f"⚠️ Signal error {symbol}: {e}")
-            continue
-
-        if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
-            continue
-
-        save_signal(sig)
-
-        log(
-            f"✅ SIGNAL {symbol} | "
-            f"{sig['Direction']} | "
-            f"Score {sig['Score']} | "
-            f"{sig['Regime']}"
-        )
-
-        try:
-            stats = calculate_bot_rating()
-            msg = build_message(sig, stats)
-            send_telegram_message(msg)
-            log("📩 Telegram sent")
-        except Exception as e:
-            log(f"❌ Telegram error: {e}")
-
-        time.sleep(RATE_LIMIT_DELAY)
-
-
-if __name__ == "__main__":
-    log("🚀 OPSI A PRO Scanner started")
-
-    while True:
-        try:
-            auto_close_signals()
-            log("🔧 Auto maintenance done")
-
-            scan_market("FUTURES")
-            scan_market("SPOT")
-
-            log("😴 Cycle complete — waiting next run")
-
-        except Exception as e:
-            log(f"🔥 Scanner crash prevented: {e}")
-
-        time.sleep(SCAN_INTERVAL)
-        # ⛔ COOLDOWN
+        # ⛔ COOLDOWN CHECK
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -165,85 +137,11 @@ if __name__ == "__main__":
         # =========================
         try:
             stats = calculate_bot_rating()
-            msg = build_telegram_message(sig, stats)
+            msg = build_message(sig, stats)
             send_telegram_message(msg)
             log("📩 Telegram sent")
         except Exception as e:
             log(f"❌ Telegram error: {e}")
-
-        time.sleep(RATE_LIMIT_DELAY)
-
-
-# =========================
-# MAIN LOOP (CRON-LIKE)
-# =========================
-if __name__ == "__main__":
-    log("🚀 OPSI A PRO Scanner started")
-
-    while True:
-        try:
-            # =========================
-            # AUTO MAINTENANCE
-            # =========================
-            try:
-                auto_close_signals()
-                log("🔧 Auto maintenance done")
-            except Exception as e:
-                log(f"⚠️ Auto maintenance error: {e}")
-
-            # =========================
-            # MARKET SCANS
-            # =========================
-            scan_market("FUTURES")
-            scan_market("SPOT")
-
-            log("😴 Cycle complete — waiting next run")
-
-        except Exception as e:
-            log(f"🔥 Scanner crash prevented: {e}")
-
-        time.sleep(SCAN_INTERVAL)
-
-        # =========================
-        # SAVE SIGNAL
-        # =========================
-        save_signal(sig)
-
-        log(
-            f"✅ SIGNAL {symbol} | "
-            f"{sig['Direction']} | "
-            f"Score {sig['Score']} | "
-            f"{sig['Regime']}"
-        )
-
-        # =========================
-        # TELEGRAM ALERT
-        # =========================
-        try:
-            send_telegram_message(
-                build_telegram_message(sig)
-            )
-            log("📩 Telegram signal sent")
-        except Exception as e:
-            log(f"❌ Telegram error: {e}")
-
-        # =========================
-        # BOT PERFORMANCE SNAPSHOT
-        # =========================
-        try:
-            if should_send_rating():
-                stats = calculate_bot_rating()
-                if stats and stats.get("valid"):
-                    send_telegram_message(
-                        "📊 BOT PERFORMANCE\n\n"
-                        f"Rating     : {stats['rating']}\n"
-                        f"Win Rate   : {stats['win_rate']}%\n"
-                        f"Expectancy : {stats['expectancy']} R\n"
-                        f"Trades     : {stats['trades']}"
-                    )
-                    log("📊 Bot rating sent")
-        except Exception:
-            pass
 
         time.sleep(RATE_LIMIT_DELAY)
 
@@ -260,6 +158,7 @@ if __name__ == "__main__":
             # AUTO MAINTENANCE
             # =========================
             auto_close_signals()
+            log("🔧 Auto maintenance done")
 
             # =========================
             # MARKET SCANS
