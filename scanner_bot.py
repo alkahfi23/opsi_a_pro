@@ -1,10 +1,10 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | NO STREAMLIT | STABLE
+# CRON-LIKE | RENDER SAFE | NO STREAMLIT
 # =====================================================
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from exchange import get_okx
 from signals import check_signal
@@ -38,7 +38,7 @@ def log(msg: str):
 
 
 # =========================
-# TELEGRAM MESSAGE (PLAIN TEXT)
+# BUILD TELEGRAM MESSAGE
 # =========================
 def build_message(sig: dict, stats: dict | None) -> str:
     msg = (
@@ -51,8 +51,8 @@ def build_message(sig: dict, stats: dict | None) -> str:
         f"Entry      : {sig['Entry']}\n"
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
-        f"TP2        : {sig['TP2']}\n"
-        f"Time       : {sig.get('TimeWIB','')}\n"
+        f"TP2        : {sig['TP2']}\n\n"
+        f"Time       : {sig.get('TimeWIB', '')}\n"
     )
 
     if stats and stats.get("valid"):
@@ -82,7 +82,7 @@ def scan_market(mode: str):
         log("⏳ SPOT outside optimal hours — skip")
         return
 
-    # Symbol universe
+    # 📡 Symbol universe
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
@@ -96,7 +96,7 @@ def scan_market(mode: str):
 
     for symbol in symbols:
 
-        # ⛔ Cooldown (anti spam)
+        # ⛔ Cooldown anti-duplicate
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -109,8 +109,23 @@ def scan_market(mode: str):
         if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
             continue
 
-        # 💾 Save
-        save_signal(sig)
+        # =========================
+        # TIME STAMP (WIB + UTC)
+        # =========================
+        now_utc = datetime.now(timezone.utc)
+        now_wib = now_utc.astimezone(timezone(timedelta(hours=7)))
+
+        sig["TimeUTC"] = now_utc.isoformat()
+        sig["TimeWIB"] = now_wib.strftime("%Y-%m-%d %H:%M WIB")
+
+        # =========================
+        # SAVE SIGNAL
+        # =========================
+        try:
+            save_signal(sig)
+        except Exception as e:
+            log(f"❌ Save signal failed {symbol}: {e}")
+            continue
 
         log(
             f"✅ SIGNAL {symbol} | "
@@ -119,7 +134,9 @@ def scan_market(mode: str):
             f"{sig['Regime']}"
         )
 
-        # 📩 Telegram
+        # =========================
+        # TELEGRAM ALERT
+        # =========================
         try:
             stats = calculate_bot_rating()
             msg = build_message(sig, stats)
@@ -131,19 +148,19 @@ def scan_market(mode: str):
         time.sleep(RATE_LIMIT_DELAY)
 
 
-# =========================
-# MAIN LOOP (SINGLE & CLEAN)
-# =========================
+# =====================================================
+# MAIN LOOP (CRON-LIKE)
+# =====================================================
 if __name__ == "__main__":
     log("🚀 OPSI A PRO Scanner started")
 
     while True:
         try:
-            # 🔧 Auto maintenance
+            # 🔧 Auto maintenance (TP / SL)
             auto_close_signals()
             log("🔧 Auto maintenance done")
 
-            # 🔍 Scan markets
+            # 📡 Market scans
             scan_market("FUTURES")
             scan_market("SPOT")
 
