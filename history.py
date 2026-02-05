@@ -123,50 +123,66 @@ def save_signal(signal: dict):
 # AUTO CLOSE + TELEGRAM
 # =====================================================
 def auto_close_signals():
-    df = load_signal_history()
+    if not os.path.exists(SIGNAL_LOG_FILE):
+        return
+
+    df = pd.read_csv(SIGNAL_LOG_FILE)
     if df.empty:
         return
 
     okx = get_okx()
     changed = False
 
-    for i, row in df.iterrows():
-        if row["Status"] not in ["OPEN", "TP1 HIT"]:
+    for i in range(len(df)):
+        status = df.at[i, "Status"]
+
+        if status not in ["OPEN", "TP1 HIT"]:
             continue
 
-        price = okx.fetch_ticker(row["Symbol"])["last"]
+        try:
+            symbol = df.at[i, "Symbol"]
+            direction = df.at[i, "Direction"]
 
-        sl = float(row["SL"])
-        tp1 = float(row["TP1"])
-        tp2 = float(row["TP2"])
+            price = okx.fetch_ticker(symbol)["last"]
 
-        new_status = None
+            sl  = float(df.at[i, "SL"])
+            tp1 = float(df.at[i, "TP1"])
+            tp2 = float(df.at[i, "TP2"])
 
-        if row["Direction"] == "LONG":
-            if price <= sl:
-                new_status = "SL HIT"
-            elif price >= tp2:
-                new_status = "TP2 HIT"
-            elif price >= tp1 and row["Status"] == "OPEN":
-                new_status = "TP1 HIT"
-        else:
-            if price >= sl:
-                new_status = "SL HIT"
-            elif price <= tp2:
-                new_status = "TP2 HIT"
-            elif price <= tp1 and row["Status"] == "OPEN":
-                new_status = "TP1 HIT"
+            new_status = None
 
-        if new_status and row["Alerted"] != new_status:
-            df.at[i, "Status"] = new_status
-            df.at[i, "Alerted"] = new_status
-            changed = True
-            send_telegram_message(
-                format_trade_update(df.loc[i].to_dict())
-            )
+            if direction == "LONG":
+                if price <= sl:
+                    new_status = "SL HIT"
+                elif price >= tp2:
+                    new_status = "TP2 HIT"
+                elif price >= tp1 and status == "OPEN":
+                    new_status = "TP1 HIT"
+            else:
+                if price >= sl:
+                    new_status = "SL HIT"
+                elif price <= tp2:
+                    new_status = "TP2 HIT"
+                elif price <= tp1 and status == "OPEN":
+                    new_status = "TP1 HIT"
+
+            # ✅ SAFE CHECK (DATAFRAME BASED)
+            if new_status and df.at[i, "Alerted"] != new_status:
+                df.at[i, "Status"] = new_status
+                df.at[i, "Alerted"] = new_status
+                changed = True
+
+                send_telegram_message(
+                    format_trade_update(df.loc[i].to_dict())
+                )
+
+        except Exception as e:
+            print(f"[AUTO CLOSE ERROR] {symbol}: {e}", flush=True)
+            continue
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
+
 
 
 # =====================================================
