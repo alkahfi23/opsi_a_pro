@@ -115,9 +115,10 @@ def scan_market(mode: str):
             msg = format_signal_message(sig)
             send_telegram_message(msg)
             stats = calculate_bot_rating()
-            if stats and stats.get("valid"):
+            if should_send_rating():
+                stats = calculate_bot_rating()
                 send_telegram_message(
-                f"📊 *BOT PERFORMANCE SNAPSHOT*\n\n"
+                f"📊 *BOT PERFORMANCE UPDATE*\n\n"
                 f"⭐ Rating      : *{stats['rating']}*\n"
                 f"🎯 Win Rate    : {stats['win_rate']}%\n"
                 f"📈 Expectancy : {stats['expectancy']} R\n"
