@@ -1,5 +1,6 @@
 # =====================================================
 # OPSI A PRO — TELEGRAM BOT CORE (PRODUCTION SAFE)
+# NO MARKDOWN | NO PARSE ERROR | INSTITUTIONAL GRADE
 # =====================================================
 
 import os
@@ -14,11 +15,13 @@ if not BOT_TOKEN or not CHAT_ID:
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 
+# =====================================================
+# CORE SENDER (PLAIN TEXT ONLY)
+# =====================================================
 def send_telegram_message(text: str):
     payload = {
         "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown"
+        "text": text   # ⛔ NO parse_mode
     }
 
     r = requests.post(
@@ -33,37 +36,37 @@ def send_telegram_message(text: str):
         )
 
 
-# =========================
-# ENTRY SIGNAL MESSAGE
-# =========================
+# =====================================================
+# ENTRY SIGNAL MESSAGE (SAFE)
+# =====================================================
 def format_signal_message(sig: dict) -> str:
     return (
-        "🚀 *OPSI A PRO SIGNAL*\n\n"
-        f"*Symbol* : `{sig['Symbol']}`\n"
-        f"*Mode*   : {sig['Mode']}\n"
-        f"*Side*   : {sig['Direction']}\n"
-        f"*Score*  : {sig['Score']}\n"
-        f"*Regime* : {sig['Regime']}\n\n"
-        f"*Entry* : {sig['Entry']}\n"
-        f"*SL*    : {sig['SL']}\n"
-        f"*TP1*   : {sig['TP1']}\n"
-        f"*TP2*   : {sig['TP2']}\n\n"
-        f"⏰ {sig.get('TimeWIB','')}"
+        "OPSI A PRO SIGNAL\n\n"
+        f"Symbol     : {sig['Symbol']}\n"
+        f"Mode       : {sig['Mode']}\n"
+        f"Direction  : {sig['Direction']}\n"
+        f"Score      : {sig['Score']}\n"
+        f"Regime     : {sig['Regime']}\n\n"
+        f"Entry      : {sig['Entry']}\n"
+        f"SL         : {sig['SL']}\n"
+        f"TP1        : {sig['TP1']}\n"
+        f"TP2        : {sig['TP2']}\n\n"
+        f"Time       : {sig.get('TimeWIB', '')}"
     )
 
 
-# =========================
-# TP / SL UPDATE MESSAGE
-# =========================
+# =====================================================
+# TP / SL UPDATE MESSAGE (SAFE)
+# =====================================================
 def format_trade_update(row: dict) -> str:
     return (
-        "⚠️ *OPSI A PRO TRADE UPDATE*\n\n"
-        f"*Symbol* : {row['Symbol']}\n"
-        f"*Mode*   : {row['Mode']}\n"
-        f"*Side*   : {row['Direction']}\n"
-        f"*Status* : {row['Status']}\n\n"
-        f"*Entry* : {row['Entry']}\n"
-        f"*SL*    : {row['SL']}\n"
-        f"*TP1*   : {row['TP1']}\n"
-        f"*TP2*   : {row['TP2']}"
+        "OPSI A PRO TRADE UPDATE\n\n"
+        f"Symbol     : {row['Symbol']}\n"
+        f"Mode       : {row['Mode']}\n"
+        f"Direction  : {row['Direction']}\n"
+        f"Status     : {row['Status']}\n\n"
+        f"Entry      : {row['Entry']}\n"
+        f"SL         : {row['SL']}\n"
+        f"TP1        : {row['TP1']}\n"
+        f"TP2        : {row['TP2']}"
     )
