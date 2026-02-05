@@ -21,7 +21,7 @@ TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 def send_telegram_message(text: str):
     payload = {
         "chat_id": CHAT_ID,
-        "text": text   # ⛔ NO parse_mode
+        "text": text   # ⛔ NO parse_mode (ANTI ERROR 400)
     }
 
     r = requests.post(
