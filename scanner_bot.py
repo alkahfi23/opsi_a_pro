@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | PRODUCTION CLEAN
+# CRON-LIKE | RENDER SAFE | NO STREAMLIT | STABLE
 # =====================================================
 
 import time
@@ -22,25 +22,25 @@ from config import (
     RATE_LIMIT_DELAY
 )
 
-# =====================================================
+# =========================
 # CONFIG
-# =====================================================
+# =========================
 SCAN_INTERVAL = 300        # 5 menit
 BALANCE_DUMMY = 10_000     # simulasi only
 
 
-# =====================================================
+# =========================
 # LOGGER
-# =====================================================
+# =========================
 def log(msg: str):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
 
-# =====================================================
-# TELEGRAM MESSAGE BUILDER (SAFE)
-# =====================================================
-def build_message(sig: dict, stats: dict | None):
+# =========================
+# TELEGRAM MESSAGE (PLAIN TEXT)
+# =========================
+def build_message(sig: dict, stats: dict | None) -> str:
     msg = (
         "OPSI A PRO SIGNAL\n\n"
         f"Symbol     : {sig['Symbol']}\n"
@@ -67,15 +67,13 @@ def build_message(sig: dict, stats: dict | None):
     return msg
 
 
-# =====================================================
+# =========================
 # SCAN MARKET
-# =====================================================
+# =========================
 def scan_market(mode: str):
     okx = get_okx()
 
-    # =========================
-    # TIME GUARD
-    # =========================
+    # ⏳ Time guard
     if mode == "FUTURES" and not is_optimal_futures():
         log("⏳ FUTURES outside optimal hours — skip")
         return
@@ -84,9 +82,7 @@ def scan_market(mode: str):
         log("⏳ SPOT outside optimal hours — skip")
         return
 
-    # =========================
-    # SYMBOL UNIVERSE
-    # =========================
+    # Symbol universe
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
@@ -98,11 +94,9 @@ def scan_market(mode: str):
 
     log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
 
-    # =========================
-    # MAIN LOOP
-    # =========================
     for symbol in symbols:
 
+        # ⛔ Cooldown (anti spam)
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -115,11 +109,8 @@ def scan_market(mode: str):
         if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
             continue
 
-        try:
-            save_signal(sig)
-        except Exception as e:
-            log(f"❌ Save signal failed {symbol}: {e}")
-            continue
+        # 💾 Save
+        save_signal(sig)
 
         log(
             f"✅ SIGNAL {symbol} | "
@@ -128,9 +119,7 @@ def scan_market(mode: str):
             f"{sig['Regime']}"
         )
 
-        # =========================
-        # TELEGRAM ALERT
-        # =========================
+        # 📩 Telegram
         try:
             stats = calculate_bot_rating()
             msg = build_message(sig, stats)
@@ -142,17 +131,19 @@ def scan_market(mode: str):
         time.sleep(RATE_LIMIT_DELAY)
 
 
-# =====================================================
-# MAIN LOOP (ONLY ONE!)
-# =====================================================
+# =========================
+# MAIN LOOP (SINGLE & CLEAN)
+# =========================
 if __name__ == "__main__":
     log("🚀 OPSI A PRO Scanner started")
 
     while True:
         try:
+            # 🔧 Auto maintenance
             auto_close_signals()
             log("🔧 Auto maintenance done")
 
+            # 🔍 Scan markets
             scan_market("FUTURES")
             scan_market("SPOT")
 
