@@ -203,3 +203,22 @@ def calculate_bot_rating():
         "expectancy": round(expectancy, 2),
         "trades": len(closed)
     }
+
+# =====================================================
+# RATING SEND GUARD (ANTI SPAM)
+# =====================================================
+def should_send_rating() -> bool:
+    """
+    Kirim rating hanya setiap kelipatan 10 closed trades
+    Minimal 20 trades agar valid
+    """
+    df = load_signal_history()
+    if df.empty:
+        return False
+
+    closed = df[df["Status"].isin(["TP1 HIT", "TP2 HIT", "SL HIT"])]
+
+    if len(closed) < 20:
+        return False
+
+    return len(closed) % 10 == 0
