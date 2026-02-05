@@ -250,3 +250,49 @@ def monitor_regime_flip():
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
+
+# =====================================================
+# BOT PERFORMANCE METRICS
+# =====================================================
+def calculate_bot_rating():
+    df = load_signal_history()
+    if df.empty:
+        return None
+
+    closed = df[df["Status"].isin(["TP1 HIT", "TP2 HIT", "SL HIT"])]
+    if len(closed) < 20:
+        return {
+            "valid": False,
+            "trades": len(closed)
+        }
+
+    wins = closed[closed["Status"] != "SL HIT"]
+    losses = closed[closed["Status"] == "SL HIT"]
+
+    win_rate = len(wins) / len(closed)
+
+    avg_win_r = 1.5     # asumsi TP1 scaling
+    avg_loss_r = 1.0
+
+    expectancy = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
+
+    # =========================
+    # BOT RATING
+    # =========================
+    if expectancy >= 0.7 and win_rate >= 0.6:
+        rating = "A+"
+    elif expectancy >= 0.4:
+        rating = "A"
+    elif expectancy >= 0.2:
+        rating = "B"
+    else:
+        rating = "C"
+
+    return {
+        "valid": True,
+        "rating": rating,
+        "win_rate": round(win_rate * 100, 2),
+        "expectancy": round(expectancy, 2),
+        "trades": len(closed)
+    }
+
