@@ -1,10 +1,10 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | NO STREAMLIT
+# CRON-LIKE | PRODUCTION SAFE | INVESTOR GRADE
 # =====================================================
 
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from exchange import get_okx
 from signals import check_signal
@@ -22,25 +22,23 @@ from config import (
     RATE_LIMIT_DELAY
 )
 
-# =========================
+# =====================================================
 # CONFIG
-# =========================
+# =====================================================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi only
+BALANCE_DUMMY = 10_000     # simulasi (no execution)
 
-
-# =========================
+# =====================================================
 # LOGGER
-# =========================
+# =====================================================
 def log(msg: str):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
-
-# =========================
-# BUILD TELEGRAM MESSAGE
-# =========================
-def build_message(sig: dict, stats: dict | None) -> str:
+# =====================================================
+# BUILD TELEGRAM MESSAGE (SAFE)
+# =====================================================
+def build_message(sig: dict, stats: dict | None):
     msg = (
         "OPSI A PRO SIGNAL\n\n"
         f"Symbol     : {sig['Symbol']}\n"
@@ -51,29 +49,41 @@ def build_message(sig: dict, stats: dict | None) -> str:
         f"Entry      : {sig['Entry']}\n"
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
-        f"TP2        : {sig['TP2']}\n\n"
-        f"Time       : {sig.get('TimeWIB', '')}\n"
+        f"TP2        : {sig['TP2']}\n"
+        f"Time (WIB) : {sig.get('TimeWIB','')}\n"
     )
 
-    if stats and stats.get("valid"):
-        msg += (
-            "\nBOT PERFORMANCE\n"
-            f"Rating     : {stats['rating']}\n"
-            f"Win Rate   : {stats['win_rate']}%\n"
-            f"Expectancy : {stats['expectancy']} R\n"
-            f"Trades     : {stats['trades']}\n"
-        )
+    # =========================
+    # BOT PERFORMANCE SNAPSHOT
+    # =========================
+    if stats:
+        if stats.get("valid"):
+            msg += (
+                "\nBOT PERFORMANCE\n"
+                f"Rating     : {stats['rating']}\n"
+                f"Win Rate   : {stats['win_rate']}%\n"
+                f"Expectancy : {stats['expectancy']} R\n"
+                f"Trades     : {stats['trades']}\n"
+            )
+        else:
+            msg += (
+                "\nBOT STATUS\n"
+                f"Trades     : {stats['trades']}\n"
+                "Rating     : WARM-UP\n"
+                "Status     : Collecting data\n"
+            )
 
     return msg
 
-
-# =========================
+# =====================================================
 # SCAN MARKET
-# =========================
+# =====================================================
 def scan_market(mode: str):
     okx = get_okx()
 
-    # ⏳ Time guard
+    # =========================
+    # TIME GUARD
+    # =========================
     if mode == "FUTURES" and not is_optimal_futures():
         log("⏳ FUTURES outside optimal hours — skip")
         return
@@ -82,21 +92,27 @@ def scan_market(mode: str):
         log("⏳ SPOT outside optimal hours — skip")
         return
 
-    # 📡 Symbol universe
+    # =========================
+    # SYMBOL UNIVERSE
+    # =========================
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+            if m.get("spot") and m.get("active")
+            and s.endswith("/USDT")
         ][:MAX_SCAN_SYMBOLS]
     )
 
     log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
 
+    # =========================
+    # MAIN LOOP
+    # =========================
     for symbol in symbols:
 
-        # ⛔ Cooldown anti-duplicate
+        # ⛔ COOLDOWN (ANTI DUPLICATE)
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -108,15 +124,6 @@ def scan_market(mode: str):
 
         if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
             continue
-
-        # =========================
-        # TIME STAMP (WIB + UTC)
-        # =========================
-        now_utc = datetime.now(timezone.utc)
-        now_wib = now_utc.astimezone(timezone(timedelta(hours=7)))
-
-        sig["TimeUTC"] = now_utc.isoformat()
-        sig["TimeWIB"] = now_wib.strftime("%Y-%m-%d %H:%M WIB")
 
         # =========================
         # SAVE SIGNAL
@@ -147,7 +154,6 @@ def scan_market(mode: str):
 
         time.sleep(RATE_LIMIT_DELAY)
 
-
 # =====================================================
 # MAIN LOOP (CRON-LIKE)
 # =====================================================
@@ -156,11 +162,16 @@ if __name__ == "__main__":
 
     while True:
         try:
-            # 🔧 Auto maintenance (TP / SL)
+            # =========================
+            # AUTO MAINTENANCE
+            # (TP / SL update + Telegram)
+            # =========================
             auto_close_signals()
             log("🔧 Auto maintenance done")
 
-            # 📡 Market scans
+            # =========================
+            # MARKET SCANS
+            # =========================
             scan_market("FUTURES")
             scan_market("SPOT")
 
