@@ -1,5 +1,6 @@
 # =====================================================
-# OPSI A PRO — AUTO SCANNER BOT
+# OPSI A PRO — SCANNER BOT
+# FILE : scanner_bot.py
 # CRON-LIKE | RENDER SAFE | CLEAN LOG | ANTI DUPLICATE
 # =====================================================
 
@@ -12,7 +13,8 @@ from history import (
     save_signal,
     auto_close_signals,
     is_symbol_in_cooldown,
-    calculate_bot_rating
+    calculate_bot_rating,
+    should_send_rating
 )
 from telegram_bot import send_telegram_message
 from scheduler import is_optimal_spot, is_optimal_futures
@@ -22,26 +24,25 @@ from config import (
     RATE_LIMIT_DELAY
 )
 
-# =========================
+# =====================================================
 # CONFIG
-# =========================
+# =====================================================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi only
+BALANCE_DUMMY = 10_000     # simulasi only (no execution)
 
-
-# =========================
+# =====================================================
 # SIMPLE LOGGER
-# =========================
+# =====================================================
 def log(msg: str):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
 
 # =====================================================
-# FORMAT TELEGRAM MESSAGE (SAFE, NO MARKDOWN ERROR)
+# TELEGRAM MESSAGE (SAFE — NO MARKDOWN)
 # =====================================================
-def build_telegram_message(sig: dict, stats: dict | None) -> str:
-    msg = (
+def build_telegram_message(sig: dict) -> str:
+    return (
         "🚀 OPSI A PRO SIGNAL\n\n"
         f"Symbol     : {sig['Symbol']}\n"
         f"Mode       : {sig['Mode']}\n"
@@ -51,20 +52,8 @@ def build_telegram_message(sig: dict, stats: dict | None) -> str:
         f"Entry      : {sig['Entry']}\n"
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
-        f"TP2        : {sig['TP2']}\n"
-        f"Time       : {sig['Time']}\n"
+        f"TP2        : {sig['TP2']}"
     )
-
-    if stats and stats.get("valid"):
-        msg += (
-            "\n📊 BOT PERFORMANCE\n"
-            f"Rating     : {stats['rating']}\n"
-            f"Win Rate   : {stats['win_rate']}%\n"
-            f"Expectancy : {stats['expectancy']} R\n"
-            f"Trades     : {stats['trades']}\n"
-        )
-
-    return msg
 
 
 # =====================================================
@@ -104,7 +93,7 @@ def scan_market(mode: str):
     # =========================
     for symbol in symbols:
 
-        # ⛔ COOLDOWN (ANTI DUPLICATE)
+        # ⛔ ANTI DUPLICATE
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -130,15 +119,33 @@ def scan_market(mode: str):
         )
 
         # =========================
-        # TELEGRAM ALERT (SAFE)
+        # TELEGRAM ALERT
         # =========================
         try:
-            stats = calculate_bot_rating()
-            msg = build_telegram_message(sig, stats)
-            send_telegram_message(msg)
-            log("📩 Telegram sent")
+            send_telegram_message(
+                build_telegram_message(sig)
+            )
+            log("📩 Telegram signal sent")
         except Exception as e:
             log(f"❌ Telegram error: {e}")
+
+        # =========================
+        # BOT PERFORMANCE SNAPSHOT
+        # =========================
+        try:
+            if should_send_rating():
+                stats = calculate_bot_rating()
+                if stats and stats.get("valid"):
+                    send_telegram_message(
+                        "📊 BOT PERFORMANCE\n\n"
+                        f"Rating     : {stats['rating']}\n"
+                        f"Win Rate   : {stats['win_rate']}%\n"
+                        f"Expectancy : {stats['expectancy']} R\n"
+                        f"Trades     : {stats['trades']}"
+                    )
+                    log("📊 Bot rating sent")
+        except Exception:
+            pass
 
         time.sleep(RATE_LIMIT_DELAY)
 
@@ -155,7 +162,6 @@ if __name__ == "__main__":
             # AUTO MAINTENANCE
             # =========================
             auto_close_signals()
-            log("🔧 Auto maintenance done")
 
             # =========================
             # MARKET SCANS
