@@ -296,3 +296,8 @@ def calculate_bot_rating():
         "trades": len(closed)
     }
 
+def should_send_rating():
+    df = load_signal_history()
+    closed = df[df["Status"].isin(["TP1 HIT", "TP2 HIT", "SL HIT"])]
+    return len(closed) % 10 == 0 and len(closed) >= 20
+
