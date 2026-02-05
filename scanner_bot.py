@@ -3,27 +3,19 @@
 # CRON-LIKE | RENDER SAFE | CLEAN LOG | ANTI DUPLICATE
 # =====================================================
 
-# =========================
-# CORE IMPORT (NO STREAMLIT)
-# =========================
 import time
 from datetime import datetime
-from history import calculate_bot_rating
+
 from exchange import get_okx
 from signals import check_signal
 from history import (
     save_signal,
     auto_close_signals,
-    is_symbol_in_cooldown
+    is_symbol_in_cooldown,
+    calculate_bot_rating
 )
-from telegram_bot import (
-    send_telegram_message,
-    format_signal_message
-)
-from scheduler import (
-    is_optimal_spot,
-    is_optimal_futures
-)
+from telegram_bot import send_telegram_message
+from scheduler import is_optimal_spot, is_optimal_futures
 from config import (
     FUTURES_BIG_COINS,
     MAX_SCAN_SYMBOLS,
@@ -43,6 +35,36 @@ BALANCE_DUMMY = 10_000     # simulasi only
 def log(msg: str):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
+
+
+# =====================================================
+# FORMAT TELEGRAM MESSAGE (SAFE, NO MARKDOWN ERROR)
+# =====================================================
+def build_telegram_message(sig: dict, stats: dict | None) -> str:
+    msg = (
+        "🚀 OPSI A PRO SIGNAL\n\n"
+        f"Symbol     : {sig['Symbol']}\n"
+        f"Mode       : {sig['Mode']}\n"
+        f"Direction  : {sig['Direction']}\n"
+        f"Score      : {sig['Score']}\n"
+        f"Regime     : {sig['Regime']}\n\n"
+        f"Entry      : {sig['Entry']}\n"
+        f"SL         : {sig['SL']}\n"
+        f"TP1        : {sig['TP1']}\n"
+        f"TP2        : {sig['TP2']}\n"
+        f"Time       : {sig['Time']}\n"
+    )
+
+    if stats and stats.get("valid"):
+        msg += (
+            "\n📊 BOT PERFORMANCE\n"
+            f"Rating     : {stats['rating']}\n"
+            f"Win Rate   : {stats['win_rate']}%\n"
+            f"Expectancy : {stats['expectancy']} R\n"
+            f"Trades     : {stats['trades']}\n"
+        )
+
+    return msg
 
 
 # =====================================================
@@ -70,7 +92,8 @@ def scan_market(mode: str):
         if mode == "FUTURES"
         else [
             s for s, m in okx.markets.items()
-            if m.get("spot") and m.get("active") and s.endswith("/USDT")
+            if m.get("spot") and m.get("active")
+            and s.endswith("/USDT")
         ][:MAX_SCAN_SYMBOLS]
     )
 
@@ -81,9 +104,7 @@ def scan_market(mode: str):
     # =========================
     for symbol in symbols:
 
-        # =========================
-        # COOLDOWN CHECK (ANTI SPAM)
-        # =========================
+        # ⛔ COOLDOWN (ANTI DUPLICATE)
         if is_symbol_in_cooldown(symbol, mode):
             continue
 
@@ -109,21 +130,12 @@ def scan_market(mode: str):
         )
 
         # =========================
-        # TELEGRAM ALERT (ENTRY)
+        # TELEGRAM ALERT (SAFE)
         # =========================
         try:
-            msg = format_signal_message(sig)
-            send_telegram_message(msg)
             stats = calculate_bot_rating()
-            if should_send_rating():
-                stats = calculate_bot_rating()
-                send_telegram_message(
-                f"📊 *BOT PERFORMANCE UPDATE*\n\n"
-                f"⭐ Rating      : *{stats['rating']}*\n"
-                f"🎯 Win Rate    : {stats['win_rate']}%\n"
-                f"📈 Expectancy : {stats['expectancy']} R\n"
-                f"🧪 Trades     : {stats['trades']}"
-                )
+            msg = build_telegram_message(sig, stats)
+            send_telegram_message(msg)
             log("📩 Telegram sent")
         except Exception as e:
             log(f"❌ Telegram error: {e}")
@@ -140,10 +152,11 @@ if __name__ == "__main__":
     while True:
         try:
             # =========================
-            # AUTO MAINTENANCE FIRST
+            # AUTO MAINTENANCE
             # =========================
             auto_close_signals()
             log("🔧 Auto maintenance done")
+
             # =========================
             # MARKET SCANS
             # =========================
