@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — SIGNAL HISTORY ENGINE
-# FINAL | STABLE | REGIME FREEZE + TELEGRAM + COOLDOWN
+# REGIME FREEZE + TELEGRAM + COOLDOWN + BOT RATING
 # =====================================================
 
 import os
@@ -19,15 +19,12 @@ from scoring import institutional_score
 from regime import detect_market_regime
 
 
-# =====================================================
-# FILE STRUCTURE
-# =====================================================
 COLUMNS = [
-    "TimeUTC",             # ⏱️ internal UTC time
-    "TimeWIB",             # 🕒 display only
+    "TimeUTC",
+    "TimeWIB",
     "Symbol",
     "Phase",
-    "Regime",              # 🔒 entry regime
+    "Regime",
     "CurrentRegime",
     "RegimeShift",
     "Score",
@@ -45,9 +42,6 @@ COLUMNS = [
 ]
 
 
-# =====================================================
-# INIT FILE
-# =====================================================
 def _init_file():
     if not os.path.exists(SIGNAL_LOG_FILE):
         pd.DataFrame(columns=COLUMNS).to_csv(
@@ -55,19 +49,13 @@ def _init_file():
         )
 
 
-# =====================================================
-# LOAD HISTORY
-# =====================================================
 def load_signal_history():
     _init_file()
-    try:
-        return pd.read_csv(SIGNAL_LOG_FILE)
-    except Exception:
-        return pd.DataFrame(columns=COLUMNS)
+    return pd.read_csv(SIGNAL_LOG_FILE)
 
 
 # =====================================================
-# SYMBOL COOLDOWN CHECK
+# COOLDOWN CHECK
 # =====================================================
 def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
     df = load_signal_history()
@@ -75,7 +63,6 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
         return False
 
     df = df[df["Symbol"] == symbol]
-
     if COOLDOWN_BY_MODE:
         df = df[df["Mode"] == mode]
 
@@ -84,15 +71,10 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
 
     last = df.sort_values("TimeUTC", ascending=False).iloc[0]
 
-    # ⛔ masih OPEN → block
     if last["Status"] == "OPEN":
         return True
 
-    try:
-        last_time = datetime.fromisoformat(last["TimeUTC"])
-    except Exception:
-        return False
-
+    last_time = datetime.fromisoformat(last["TimeUTC"])
     cooldown_until = last_time + timedelta(
         minutes=SIGNAL_COOLDOWN_MINUTES
     )
@@ -101,7 +83,7 @@ def is_symbol_in_cooldown(symbol: str, mode: str) -> bool:
 
 
 # =====================================================
-# SAVE SIGNAL (ENTRY)
+# SAVE SIGNAL
 # =====================================================
 def save_signal(signal: dict):
     _init_file()
@@ -112,7 +94,7 @@ def save_signal(signal: dict):
         timezone(timedelta(hours=7))
     )
 
-    row = {
+    df.loc[len(df)] = {
         "TimeUTC": now_utc.isoformat(),
         "TimeWIB": now_wib.strftime("%Y-%m-%d %H:%M WIB"),
         "Symbol": signal["Symbol"],
@@ -134,18 +116,14 @@ def save_signal(signal: dict):
         "Alerted": ""
     }
 
-    df.loc[len(df)] = row
     df.to_csv(SIGNAL_LOG_FILE, index=False)
 
 
 # =====================================================
-# AUTO CLOSE (TP / SL)
+# AUTO CLOSE + TELEGRAM
 # =====================================================
 def auto_close_signals():
-    if not os.path.exists(SIGNAL_LOG_FILE):
-        return
-
-    df = pd.read_csv(SIGNAL_LOG_FILE)
+    df = load_signal_history()
     if df.empty:
         return
 
@@ -156,130 +134,60 @@ def auto_close_signals():
         if row["Status"] not in ["OPEN", "TP1 HIT"]:
             continue
 
-        try:
-            price = okx.fetch_ticker(row["Symbol"])["last"]
+        price = okx.fetch_ticker(row["Symbol"])["last"]
 
-            sl = float(row["SL"])
-            tp1 = float(row["TP1"])
-            tp2 = float(row["TP2"])
-            direction = row["Direction"]
+        sl = float(row["SL"])
+        tp1 = float(row["TP1"])
+        tp2 = float(row["TP2"])
 
-            new_status = None
+        new_status = None
 
-            if direction == "LONG":
-                if price <= sl:
-                    new_status = "SL HIT"
-                elif price >= tp2:
-                    new_status = "TP2 HIT"
-                elif price >= tp1 and row["Status"] == "OPEN":
-                    new_status = "TP1 HIT"
-            else:
-                if price >= sl:
-                    new_status = "SL HIT"
-                elif price <= tp2:
-                    new_status = "TP2 HIT"
-                elif price <= tp1 and row["Status"] == "OPEN":
-                    new_status = "TP1 HIT"
+        if row["Direction"] == "LONG":
+            if price <= sl:
+                new_status = "SL HIT"
+            elif price >= tp2:
+                new_status = "TP2 HIT"
+            elif price >= tp1 and row["Status"] == "OPEN":
+                new_status = "TP1 HIT"
+        else:
+            if price >= sl:
+                new_status = "SL HIT"
+            elif price <= tp2:
+                new_status = "TP2 HIT"
+            elif price <= tp1 and row["Status"] == "OPEN":
+                new_status = "TP1 HIT"
 
-            if new_status and row["Alerted"] != new_status:
-                df.at[i, "Status"] = new_status
-                df.at[i, "Alerted"] = new_status
-                changed = True
-
-                send_telegram_message(
-                    format_trade_update(df.loc[i].to_dict())
-                )
-
-        except Exception:
-            continue
+        if new_status and row["Alerted"] != new_status:
+            df.at[i, "Status"] = new_status
+            df.at[i, "Alerted"] = new_status
+            changed = True
+            send_telegram_message(
+                format_trade_update(df.loc[i].to_dict())
+            )
 
     if changed:
         df.to_csv(SIGNAL_LOG_FILE, index=False)
 
 
 # =====================================================
-# REGIME FLIP MONITOR
-# =====================================================
-def monitor_regime_flip():
-    if not os.path.exists(SIGNAL_LOG_FILE):
-        return
-
-    df = pd.read_csv(SIGNAL_LOG_FILE)
-    if df.empty:
-        return
-
-    changed = False
-
-    for i, row in df.iterrows():
-        if row["Status"] != "OPEN":
-            continue
-
-        try:
-            symbol = row["Symbol"]
-
-            df4h = fetch_ohlcv(symbol, "4h", 200)
-            df1d = fetch_ohlcv(symbol, "1d", 200)
-
-            score_data = institutional_score(
-                df4h, df1d, row["Direction"]
-            )
-
-            current_regime = detect_market_regime(
-                df4h, df1d, score_data
-            )
-
-            df.at[i, "CurrentRegime"] = current_regime
-
-            if (
-                current_regime != row["Regime"]
-                and not row["RegimeShift"]
-            ):
-                df.at[i, "RegimeShift"] = True
-                changed = True
-
-                send_telegram_message(
-                    f"🚨 *REGIME FLIP ALERT*\n\n"
-                    f"Symbol : `{symbol}`\n"
-                    f"From   : {row['Regime']}\n"
-                    f"To     : {current_regime}\n\n"
-                    f"⚠️ Position still OPEN"
-                )
-
-        except Exception:
-            continue
-
-    if changed:
-        df.to_csv(SIGNAL_LOG_FILE, index=False)
-
-# =====================================================
-# BOT PERFORMANCE METRICS
+# BOT PERFORMANCE RATING
 # =====================================================
 def calculate_bot_rating():
     df = load_signal_history()
-    if df.empty:
-        return None
+    closed = df[df["Status"].isin(
+        ["TP1 HIT", "TP2 HIT", "SL HIT"]
+    )]
 
-    closed = df[df["Status"].isin(["TP1 HIT", "TP2 HIT", "SL HIT"])]
     if len(closed) < 20:
-        return {
-            "valid": False,
-            "trades": len(closed)
-        }
+        return {"valid": False, "trades": len(closed)}
 
     wins = closed[closed["Status"] != "SL HIT"]
     losses = closed[closed["Status"] == "SL HIT"]
 
     win_rate = len(wins) / len(closed)
+    expectancy = (win_rate * 1.5) - ((1 - win_rate) * 1.0)
 
-    avg_win_r = 1.5     # asumsi TP1 scaling
-    avg_loss_r = 1.0
-
-    expectancy = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
-
-    # =========================
-    # BOT RATING
-    # =========================
-    if expectancy >= 0.7 and win_rate >= 0.6:
+    if expectancy >= 0.7:
         rating = "A+"
     elif expectancy >= 0.4:
         rating = "A"
@@ -295,9 +203,3 @@ def calculate_bot_rating():
         "expectancy": round(expectancy, 2),
         "trades": len(closed)
     }
-
-def should_send_rating():
-    df = load_signal_history()
-    closed = df[df["Status"].isin(["TP1 HIT", "TP2 HIT", "SL HIT"])]
-    return len(closed) % 10 == 0 and len(closed) >= 20
-
