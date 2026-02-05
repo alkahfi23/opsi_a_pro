@@ -1,6 +1,6 @@
 # =====================================================
 # OPSI A PRO — AUTO SCANNER BOT
-# CRON-LIKE | RENDER SAFE | CLEAN LOG | ANTI DUPLICATE
+# CRON-LIKE | RENDER SAFE | NO STREAMLIT
 # =====================================================
 
 import time
@@ -22,26 +22,18 @@ from config import (
     RATE_LIMIT_DELAY
 )
 
-# =========================
-# CONFIG
-# =========================
 SCAN_INTERVAL = 300        # 5 menit
-BALANCE_DUMMY = 10_000     # simulasi only (no execution)
+BALANCE_DUMMY = 10_000     # simulasi
 
-# =========================
-# LOGGER (UTC SAFE)
-# =========================
+
 def log(msg: str):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"[{now}] {msg}", flush=True)
 
 
-# =========================
-# TELEGRAM MESSAGE (PLAIN TEXT, NO MARKDOWN ERROR)
-# =========================
-def build_telegram_message(sig: dict, stats: dict | None) -> str:
+def build_message(sig: dict, stats: dict | None):
     msg = (
-        "🚀 OPSI A PRO SIGNAL\n\n"
+        "OPSI A PRO SIGNAL\n\n"
         f"Symbol     : {sig['Symbol']}\n"
         f"Mode       : {sig['Mode']}\n"
         f"Direction  : {sig['Direction']}\n"
@@ -51,11 +43,12 @@ def build_telegram_message(sig: dict, stats: dict | None) -> str:
         f"SL         : {sig['SL']}\n"
         f"TP1        : {sig['TP1']}\n"
         f"TP2        : {sig['TP2']}\n"
+        f"Time       : {sig['Time']}\n"
     )
 
     if stats and stats.get("valid"):
         msg += (
-            "\n📊 BOT PERFORMANCE\n"
+            "\nBOT PERFORMANCE\n"
             f"Rating     : {stats['rating']}\n"
             f"Win Rate   : {stats['win_rate']}%\n"
             f"Expectancy : {stats['expectancy']} R\n"
@@ -65,19 +58,9 @@ def build_telegram_message(sig: dict, stats: dict | None) -> str:
     return msg
 
 
-# =========================
-# SCAN FUNCTION
-# =========================
 def scan_market(mode: str):
-    try:
-        okx = get_okx()
-    except Exception as e:
-        log(f"❌ Exchange init failed: {e}")
-        return
+    okx = get_okx()
 
-    # =========================
-    # TIME FILTER
-    # =========================
     if mode == "FUTURES" and not is_optimal_futures():
         log("⏳ FUTURES outside optimal hours — skip")
         return
@@ -86,9 +69,6 @@ def scan_market(mode: str):
         log("⏳ SPOT outside optimal hours — skip")
         return
 
-    # =========================
-    # SYMBOL UNIVERSE
-    # =========================
     symbols = (
         FUTURES_BIG_COINS
         if mode == "FUTURES"
@@ -100,11 +80,57 @@ def scan_market(mode: str):
 
     log(f"🔍 Scanning {mode} — {len(symbols)} symbols")
 
-    # =========================
-    # MAIN LOOP
-    # =========================
     for symbol in symbols:
 
+        if is_symbol_in_cooldown(symbol, mode):
+            continue
+
+        try:
+            sig = check_signal(symbol, mode, BALANCE_DUMMY)
+        except Exception as e:
+            log(f"⚠️ Signal error {symbol}: {e}")
+            continue
+
+        if not sig or sig.get("SignalType") != "TRADE_EXECUTION":
+            continue
+
+        save_signal(sig)
+
+        log(
+            f"✅ SIGNAL {symbol} | "
+            f"{sig['Direction']} | "
+            f"Score {sig['Score']} | "
+            f"{sig['Regime']}"
+        )
+
+        try:
+            stats = calculate_bot_rating()
+            msg = build_message(sig, stats)
+            send_telegram_message(msg)
+            log("📩 Telegram sent")
+        except Exception as e:
+            log(f"❌ Telegram error: {e}")
+
+        time.sleep(RATE_LIMIT_DELAY)
+
+
+if __name__ == "__main__":
+    log("🚀 OPSI A PRO Scanner started")
+
+    while True:
+        try:
+            auto_close_signals()
+            log("🔧 Auto maintenance done")
+
+            scan_market("FUTURES")
+            scan_market("SPOT")
+
+            log("😴 Cycle complete — waiting next run")
+
+        except Exception as e:
+            log(f"🔥 Scanner crash prevented: {e}")
+
+        time.sleep(SCAN_INTERVAL)
         # ⛔ COOLDOWN
         if is_symbol_in_cooldown(symbol, mode):
             continue
