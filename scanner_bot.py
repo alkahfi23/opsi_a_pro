@@ -8,7 +8,7 @@
 # =========================
 import time
 from datetime import datetime
-
+from history import calculate_bot_rating
 from exchange import get_okx
 from signals import check_signal
 from history import (
@@ -114,6 +114,15 @@ def scan_market(mode: str):
         try:
             msg = format_signal_message(sig)
             send_telegram_message(msg)
+            stats = calculate_bot_rating()
+            if stats and stats.get("valid"):
+                send_telegram_message(
+                f"📊 *BOT PERFORMANCE SNAPSHOT*\n\n"
+                f"⭐ Rating      : *{stats['rating']}*\n"
+                f"🎯 Win Rate    : {stats['win_rate']}%\n"
+                f"📈 Expectancy : {stats['expectancy']} R\n"
+                f"🧪 Trades     : {stats['trades']}"
+                )
             log("📩 Telegram sent")
         except Exception as e:
             log(f"❌ Telegram error: {e}")
